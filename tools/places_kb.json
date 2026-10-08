@@ -1,0 +1,1351 @@
+{
+ "places": [
+  {
+   "name": "مسجد ملا الحديثى",
+   "category": "religious",
+   "era": null,
+   "built": null,
+   "summary_ar": "مسجد محلي بحسب بيانات الخريطة. لا تتوافر معلومات كافية لتحديد تاريخ بنائه أو خصائصه المعمارية.",
+   "site_relevance_ar": "تُراعى مداخل المصلين وهدوء المحيط عند تنظيم المشاة.",
+   "analysis_value": "medium",
+   "confidence": "low"
+  },
+  {
+   "name": "شارع المأمون",
+   "category": "street",
+   "era": null,
+   "built": null,
+   "summary_ar": "شارع داخل منطقة الدراسة، مصنف طريقاً رئيسياً في البيانات. هذا التصنيف لا يحدد عرضه أو قيمته التراثية.",
+   "site_relevance_ar": "يُدرس لتوزيع الوصول والخدمة قبل تحويل الداخل إلى المشاة.",
+   "analysis_value": "high",
+   "confidence": "medium"
+  },
+  {
+   "name": "شارع الرشيد",
+   "category": "street",
+   "era": "عثماني",
+   "built": "1916؛ مع تطور عمراني لاحق",
+   "summary_ar": "محور تجاري تاريخي تتميز أجزاء منه بالأروقة والأعمدة. اكتمل شقه سنة 1916 وفق دراسة جامعة بغداد.",
+   "site_relevance_ar": "يمثل حافة الوصول إلى الموقع وصلة المشاة نحو المتنبي والأسواق.",
+   "analysis_value": "high",
+   "confidence": "high",
+   "sources": [
+    "https://www.jcoart.uobaghdad.edu.iq/index.php/2075-3047/article/view/1497"
+   ]
+  },
+  {
+   "name": "شارع حافظ القاضي",
+   "category": "street",
+   "era": null,
+   "built": null,
+   "summary_ar": "شارع في النسيج التجاري لوسط بغداد. ينبغي تمييز مساره عن العمارة التي تحمل الاسم نفسه.",
+   "site_relevance_ar": "يُدرس بوصفه مدخلاً للمشاة مع تنظيم التحميل والوصول الطرفي.",
+   "analysis_value": "high",
+   "confidence": "medium"
+  },
+  {
+   "name": "سوق الصفافير",
+   "category": "market",
+   "era": null,
+   "built": null,
+   "summary_ar": "سوق بغدادي اشتهر بصناعة الأواني النحاسية وطرقها وإصلاحها. قيمته في الحرفة والدكاكين المتجاورة، مع تغير بعض الأنشطة بمرور الزمن.",
+   "site_relevance_ar": "يصلح لمحور حرفي حي يربط الرشيد بداخل الموقع والنهر.",
+   "analysis_value": "high",
+   "confidence": "high"
+  },
+  {
+   "name": "شارع النهر",
+   "category": "street",
+   "era": null,
+   "built": null,
+   "summary_ar": "شارع تجاري تاريخي ضمن النسيج القريب من دجلة. لا تعني تسميته أنه ممشى نهري متصل على امتداده.",
+   "site_relevance_ar": "يحمل الترام المقترح، مع وصلات مشاة عرضية إلى الكورنيش.",
+   "analysis_value": "high",
+   "confidence": "high"
+  },
+  {
+   "name": "شارع المستنصر",
+   "category": "street",
+   "era": null,
+   "built": null,
+   "summary_ar": "شارع مسجل داخل منطقة الدراسة. لا تكفي التسمية لربطه بتاريخ إنشاء المدرسة المستنصرية.",
+   "site_relevance_ar": "تُختبر مساهمته في وصل الأسواق بالمستنصرية ومداخل النهر.",
+   "analysis_value": "medium",
+   "confidence": "medium"
+  },
+  {
+   "name": "شارع السموأل بن عادياء",
+   "category": "street",
+   "era": null,
+   "built": null,
+   "summary_ar": "شارع يحمل اسم الشاعر السموأل بن عادياء. الاسم وحده لا يثبت تاريخ الشارع أو الانتماء الديني لسكانه.",
+   "site_relevance_ar": "يمكن دمجه في شبكة الأزقة المخصصة للمشاة داخل الموقع.",
+   "analysis_value": "medium",
+   "confidence": "medium"
+  },
+  {
+   "name": "بيت لنج",
+   "category": "heritage_house",
+   "era": null,
+   "built": null,
+   "summary_ar": "تسمية ترتبط بذاكرة لنج والملاحة النهرية في بغداد. تحتاج هوية المبنى وحدوده وعناصره الباقية إلى توثيق.",
+   "site_relevance_ar": "مرشح لشرح علاقة النهر بالتجارة بعد تثبيت هويته.",
+   "analysis_value": "high",
+   "confidence": "medium"
+  },
+  {
+   "name": "المدرسة الآصفية",
+   "category": "education",
+   "era": null,
+   "built": null,
+   "summary_ar": "مدرسة مسجلة بهذا الاسم في الخريطة. يلزم التحقق من علاقتها بالجامع الآصفي قبل إسناد تاريخ المعلم إليها.",
+   "site_relevance_ar": "تُفحص ضمن محيط المستنصرية دون احتسابها معلماً مستقلاً تلقائياً.",
+   "analysis_value": "medium",
+   "confidence": "low"
+  },
+  {
+   "name": "مجمع عمو بابا الرياضي",
+   "category": "other",
+   "era": null,
+   "built": null,
+   "summary_ar": "مرفق رياضي بحسب التصنيف المدخل. لا توجد معلومات تثبت قيمة تراثية للمبنى.",
+   "site_relevance_ar": "تُراعى حركة مستخدميه ضمن خدمات الحي ومسارات المشاة.",
+   "analysis_value": "low",
+   "confidence": "medium"
+  },
+  {
+   "name": "مكان اقامة ساسون حسقيل",
+   "category": "other",
+   "era": null,
+   "built": null,
+   "summary_ar": "نقطة منسوبة إلى إقامة ساسون حسقيل، من شخصيات الدولة العراقية الحديثة. التسمية لا تثبت صحة الموضع أو بقاء الدار.",
+   "site_relevance_ar": "يمكن إدراجها في سردية الذاكرة بعد توثيق الموقع والنسبة.",
+   "analysis_value": "medium",
+   "confidence": "low"
+  },
+  {
+   "name": "غرفة تجارة بغداد",
+   "category": "other",
+   "era": null,
+   "built": null,
+   "summary_ar": "مؤسسة مرتبطة بالنشاط التجاري في بغداد. تاريخ المؤسسة لا يحدد تاريخ المبنى المشار إليه.",
+   "site_relevance_ar": "جهة محتملة للتنسيق مع التجار بشأن الخدمة والتحميل.",
+   "analysis_value": "low",
+   "confidence": "medium"
+  },
+  {
+   "name": "سوق شاؤول طوبة اليهودي",
+   "category": "market",
+   "era": null,
+   "built": null,
+   "summary_ar": "سوق منسوب في البيانات إلى شاؤول طوبة. تحتاج النسبة وتاريخ المباني وحدود السوق إلى توثيق.",
+   "site_relevance_ar": "يفيد في دراسة ذاكرة التجارة وتعدد مكوناتها بعد التحقق.",
+   "analysis_value": "medium",
+   "confidence": "low"
+  },
+  {
+   "name": "خان شماش اليهودي",
+   "category": "khan",
+   "era": null,
+   "built": null,
+   "summary_ar": "مبنى مسجل باسم خان شماش. لا تكفي التسمية لإثبات تاريخ الخان أو تخطيطه أو ملكيته.",
+   "site_relevance_ar": "تُدرس إمكانية إعادة استخدامه بعد مسح حالته وتثبيت هويته.",
+   "analysis_value": "medium",
+   "confidence": "low"
+  },
+  {
+   "name": "سوق مناحيم دانيال",
+   "category": "market",
+   "era": null,
+   "built": null,
+   "summary_ar": "تسمية سوق منسوبة إلى مناحيم دانيال. يلزم توثيق حدود السوق وتمييزه عن عقارات أخرى تحمل اسم العائلة.",
+   "site_relevance_ar": "مرشح ضمن مسار ذاكرة التجارة اليهودية البغدادية بعد التحقق.",
+   "analysis_value": "medium",
+   "confidence": "low"
+  },
+  {
+   "name": "قصر چوپانیان",
+   "category": "palace",
+   "era": null,
+   "built": null,
+   "summary_ar": "مبنى تسميه البيانات قصر چوپانیان. لا تتوافر معلومات كافية لإسناد تاريخ أو طراز معماري محدد إليه.",
+   "site_relevance_ar": "يُعامل كمرشح للفحص التراثي قبل اقتراح وظيفة جديدة.",
+   "analysis_value": "medium",
+   "confidence": "low"
+  },
+  {
+   "name": "رئاسة الطائفة اليهودية",
+   "category": "other",
+   "era": null,
+   "built": null,
+   "summary_ar": "تسمية لمقر مرتبط بإدارة الطائفة اليهودية بحسب الخريطة. لا تؤكد البيانات وظيفته الحالية أو عمر مبناه.",
+   "site_relevance_ar": "يدعم توثيق التنوع الاجتماعي بعد تثبيت الهوية والاستعمال.",
+   "analysis_value": "medium",
+   "confidence": "low"
+  },
+  {
+   "name": "سوق الارمن",
+   "category": "market",
+   "era": null,
+   "built": null,
+   "summary_ar": "سوق يحمل تسمية الأرمن في البيانات. الاسم وحده لا يثبت تأسيسه أو ملكية محاله أو طبيعة تجارته الحالية.",
+   "site_relevance_ar": "يُدرس ضمن شبكة الأسواق وذاكرة التنوع السكاني.",
+   "analysis_value": "medium",
+   "confidence": "low"
+  },
+  {
+   "name": "كنيس يهودي",
+   "category": "religious",
+   "era": null,
+   "built": null,
+   "summary_ar": "تسمية عامة لموضع عبادة يهودي في الخريطة. لا تحدد الكنيس المقصود أو بقاء مبناه.",
+   "site_relevance_ar": "يتطلب التحقق قبل إدراجه محطة زيارة أو دمجه مع كنيس آخر.",
+   "analysis_value": "medium",
+   "confidence": "low"
+  },
+  {
+   "name": "اورزدي بالك",
+   "category": "other",
+   "era": null,
+   "built": null,
+   "summary_ar": "تسمية ترتبط بمتاجر أورزدي باك المعروفة في تاريخ بغداد التجاري. تحتاج مطابقة النقطة مع المبنى المقصود إلى تحقق.",
+   "site_relevance_ar": "يساعد في قراءة تطور التسوق والواجهات التجارية داخل الموقع.",
+   "analysis_value": "medium",
+   "confidence": "medium"
+  },
+  {
+   "name": "خان مرجان الاثري",
+   "category": "khan",
+   "era": "إيلخاني/جلائري",
+   "built": "القرن الرابع عشر",
+   "summary_ar": "خان تاريخي من العصر الجلائري ارتبط بالتجارة والإقامة. يتميز بقاعة مركزية مسقوفة وبناء آجري ذي عقود، وهو مستقل عن جامع مرجان.",
+   "site_relevance_ar": "قطب التجارة والتراث في المثلث، ومحطة تصل الأسواق بالمستنصرية.",
+   "analysis_value": "high",
+   "confidence": "high"
+  },
+  {
+   "name": "مصرف الرشيد",
+   "category": "other",
+   "era": null,
+   "built": null,
+   "summary_ar": "مرفق مصرفي بحسب بيانات الخريطة. اسم المصرف لا يقدم دليلاً على تاريخ المبنى أو قيمته المعمارية.",
+   "site_relevance_ar": "تُراعى احتياجات الوصول والخدمة عند تنظيم حركة الشارع.",
+   "analysis_value": "low",
+   "confidence": "medium"
+  },
+  {
+   "name": "جامع الخفافين",
+   "category": "religious",
+   "era": null,
+   "built": null,
+   "summary_ar": "جامع تاريخي مرتبط ببيئة الأسواق قرب المستنصرية. يعكس اسمه صلة الجامع بحرفة الخفافين والنسيج التجاري المحيط.",
+   "site_relevance_ar": "محطة دينية ضمن مسار السوق والمستنصرية، مع حماية مداخل الصلاة.",
+   "analysis_value": "high",
+   "confidence": "medium"
+  },
+  {
+   "name": "المدرسة المستنصرية",
+   "category": "education",
+   "era": "عباسي",
+   "built": "القرن الثالث عشر",
+   "summary_ar": "مدرسة عباسية أنشأها الخليفة المستنصر بالله لتدريس المذاهب الأربعة. تتميز بفناء وأروقة وزخارف آجرية؛ يصفها ملف معالم ضفة دجلة.",
+   "site_relevance_ar": "مرتكز المثلث داخل الموقع ونقطة وصل التراث بالتنفس نحو النهر.",
+   "analysis_value": "high",
+   "confidence": "high",
+   "sources": [
+    "https://whc.unesco.org/en/tentativelists/5880/"
+   ]
+  },
+  {
+   "name": "عمارة حافظ القاضي",
+   "category": "other",
+   "era": null,
+   "built": null,
+   "summary_ar": "عمارة معروفة بتسميتها ضمن وسط بغداد التجاري. تحتاج مراحل بنائها وخصائص واجهاتها إلى توثيق معماري.",
+   "site_relevance_ar": "تساعد على تعريف بوابة الموقع واستمرار واجهات الرشيد.",
+   "analysis_value": "medium",
+   "confidence": "medium"
+  },
+  {
+   "name": "عمارة إدفيش عبود",
+   "category": "other",
+   "era": null,
+   "built": null,
+   "summary_ar": "عمارة مرتبطة بواجهة شارع الرشيد ومنطقة جامع مرجان. يُترك تاريخها وتوصيف طرازها مفتوحين لحين التوثيق.",
+   "site_relevance_ar": "تُدرس كجزء من المشهد التجاري المحيط بقطب مرجان.",
+   "analysis_value": "medium",
+   "confidence": "medium"
+  },
+  {
+   "name": "جامع مرجان",
+   "category": "religious",
+   "era": "إيلخاني/جلائري",
+   "built": "القرن الرابع عشر للأصل التاريخي؛ تعديلات لاحقة",
+   "summary_ar": "يرتبط بالمدرسة المرجانية التي أسسها أمين الدين مرجان في العصر الجلائري. تعاقبت عليه تغييرات، فلا تمثل جميع أجزائه المرحلة الأولى.",
+   "site_relevance_ar": "يربط واجهة الرشيد بخان مرجان والأسواق الداخلية.",
+   "analysis_value": "high",
+   "confidence": "high"
+  },
+  {
+   "name": "جامع الوزير",
+   "category": "religious",
+   "era": "عثماني",
+   "built": null,
+   "summary_ar": "جامع تاريخي عثماني قرب منطقة السراي. تعاقبت عليه أعمال تجديد، لذلك لا يُنسب كامل بنائه إلى مرحلة واحدة.",
+   "site_relevance_ar": "يدعم الانتقال بين أسواق الموقع والمجال الثقافي حول المتنبي.",
+   "analysis_value": "high",
+   "confidence": "medium"
+  },
+  {
+   "name": "السوق العربي",
+   "category": "market",
+   "era": null,
+   "built": null,
+   "summary_ar": "سوق تجاري في محيط منطقة الدراسة. لا تكفي البيانات لتحديد تاريخ نشأته أو تخصص جميع محاله.",
+   "site_relevance_ar": "يُربط بشبكة المشاة مع إبقاء خدمة البضائع منظمة.",
+   "analysis_value": "medium",
+   "confidence": "medium"
+  },
+  {
+   "name": "سوق السراجين",
+   "category": "market",
+   "era": null,
+   "built": null,
+   "summary_ar": "سوق تحمل تسميته ذاكرة صناعة السروج ولوازمها. لا تعني التسمية استمرار الحرفة في جميع المحال.",
+   "site_relevance_ar": "يمكن أن يشكل امتداداً لمسار الحرف بين الأسواق والمتنبي.",
+   "analysis_value": "medium",
+   "confidence": "medium"
+  },
+  {
+   "name": "سوق السراي",
+   "category": "market",
+   "era": null,
+   "built": null,
+   "summary_ar": "سوق تاريخي معروف بالقرطاسية والورق ولوازم الكتابة. تتقارب دكاكينه ضمن ممر تجاري ضيق مرتبط بمحيط المتنبي.",
+   "site_relevance_ar": "حلقة أساسية تصل اقتصاد الورق بثقافة الكتاب والموقع.",
+   "analysis_value": "high",
+   "confidence": "high"
+  },
+  {
+   "name": "جامع عثمان أفندي",
+   "category": "religious",
+   "era": null,
+   "built": null,
+   "summary_ar": "جامع مسجل بهذا الاسم في محيط الموقع. لا تكفي المعلومات لتعيين مؤسسه أو مرحلته المعمارية.",
+   "site_relevance_ar": "تُراعى حركة المصلين عند تحسين الوصلات المحلية للمشاة.",
+   "analysis_value": "medium",
+   "confidence": "low"
+  },
+  {
+   "name": "شارع الوراقين",
+   "category": "street",
+   "era": null,
+   "built": null,
+   "summary_ar": "ممر مسجل باسم الوراقين. تشير التسمية إلى عالم الورق والكتب، دون أن تثبت تاريخ المسار أو نشاطه الحالي.",
+   "site_relevance_ar": "مرشح لوصلة موضوعية ضمن شبكة الكتاب والسراي بعد تثبيت مساره.",
+   "analysis_value": "medium",
+   "confidence": "medium"
+  },
+  {
+   "name": "جامع امام طه",
+   "category": "religious",
+   "era": null,
+   "built": null,
+   "summary_ar": "جامع محلي بحسب البيانات. لا تُستنتج هوية صاحب الاسم أو تاريخ البناء من التسمية وحدها.",
+   "site_relevance_ar": "يُدرج ضمن احتياجات الحي الدينية ومسارات الوصول الهادئة.",
+   "analysis_value": "medium",
+   "confidence": "low"
+  },
+  {
+   "name": "جسر الأحرار",
+   "category": "bridge",
+   "era": "ملكي (1921–1958)",
+   "built": null,
+   "summary_ar": "جسر فوق دجلة يصل الرصافة بالكرخ. يمثل معبراً مرورياً وحداً واضحاً لمنطقة الدراسة.",
+   "site_relevance_ar": "بوابة وصول طرفية محتملة، مع معالجة عبور المشاة نحو الكورنيش.",
+   "analysis_value": "high",
+   "confidence": "high"
+  },
+  {
+   "name": "شارع المتنبي",
+   "category": "street",
+   "era": null,
+   "built": null,
+   "summary_ar": "شارع الكتب والمكتبات وملتقى القراء في بغداد. تؤكد اليونسكو مكانته الثقافية في المدينة القديمة.",
+   "site_relevance_ar": "القطب الثقافي للمثلث ومصدر حركة مشاة نحو الأسواق والنهر.",
+   "analysis_value": "high",
+   "confidence": "high",
+   "sources": [
+    "https://www.unesco.org/en/articles/unesco-director-general-official-visit-iraq"
+   ]
+  },
+  {
+   "name": "مجمع القديس يوسف",
+   "category": "other",
+   "era": null,
+   "built": null,
+   "summary_ar": "مجمع مصنف تجارياً في البيانات. لا يكفي اسمه لإثبات كونه كنيسة أو مبنى تراثياً.",
+   "site_relevance_ar": "يُقرأ بوصفه استعمالاً تجارياً مجاوراً لمسارات المشاة.",
+   "analysis_value": "low",
+   "confidence": "low"
+  },
+  {
+   "name": "كبة السراي",
+   "category": "other",
+   "era": null,
+   "built": null,
+   "summary_ar": "محل طعام بحسب الخريطة. لا تتوافر معلومات موثوقة عن عمر المنشأة أو المبنى.",
+   "site_relevance_ar": "يوفر خدمة للزوار مع تنظيم الجلوس والنفايات خارج مسار العبور.",
+   "analysis_value": "low",
+   "confidence": "medium"
+  },
+  {
+   "name": "مطعم المتنبي",
+   "category": "other",
+   "era": null,
+   "built": null,
+   "summary_ar": "مطعم مسجل قرب المجال الثقافي للمتنبي. لا تدل التسمية على قيمة تراثية خاصة للمبنى.",
+   "site_relevance_ar": "يدعم احتياجات زوار المشاة دون إشغال الممرات الضيقة.",
+   "analysis_value": "low",
+   "confidence": "medium"
+  },
+  {
+   "name": "جامع العاقولي",
+   "category": "religious",
+   "era": null,
+   "built": null,
+   "summary_ar": "جامع من معالم النسيج الديني لبغداد القديمة. يُترك تاريخ المبنى القائم وتفصيل عناصره للتوثيق المختص.",
+   "site_relevance_ar": "يساعد على ربط الأسواق بمحاور الزيارة الدينية المحلية.",
+   "analysis_value": "medium",
+   "confidence": "medium"
+  },
+  {
+   "name": "جامع سلطان باشا",
+   "category": "religious",
+   "era": null,
+   "built": null,
+   "summary_ar": "جامع مسجل بهذا الاسم. لا تكفي البيانات لتحديد شخصية المؤسس أو تأريخ المبنى.",
+   "site_relevance_ar": "تُراعى مداخله ضمن تنظيم الحركة المحيطة بالموقع.",
+   "analysis_value": "medium",
+   "confidence": "low"
+  },
+  {
+   "name": "كنيسة السيدة العذراء للاباء الكرملين",
+   "category": "religious",
+   "era": null,
+   "built": null,
+   "summary_ar": "كنيسة منسوبة إلى الآباء الكرمليين وفق التسمية. تحتاج مراحل بنائها وحالتها واستعمالها الحالي إلى تحقق.",
+   "site_relevance_ar": "تدعم قراءة التنوع الديني، مع احترام خصوصية العبادة.",
+   "analysis_value": "medium",
+   "confidence": "medium"
+  },
+  {
+   "name": "مطبعة الميناء",
+   "category": "other",
+   "era": null,
+   "built": null,
+   "summary_ar": "محل طباعة أو استنساخ بحسب التصنيف المدخل. لا توجد قرينة على قيمة تراثية مستقلة للمبنى.",
+   "site_relevance_ar": "يمثل خدمة مرتبطة باقتصاد الورق والكتب في المنطقة.",
+   "analysis_value": "low",
+   "confidence": "medium"
+  },
+  {
+   "name": "مقهى الشابندر",
+   "category": "cafe",
+   "era": null,
+   "built": "1917 (بداية الاحتلال البريطاني)",
+   "summary_ar": "مقهى بغدادي تاريخي عند شارع المتنبي، ارتبط بلقاءات المثقفين والقراء. قيمته الاجتماعية جزء أساسي من هوية المكان.",
+   "site_relevance_ar": "محطة استراحة ولقاء تربط حركة المتنبي بالسراي والقشلة.",
+   "analysis_value": "high",
+   "confidence": "high",
+   "sources": [
+    "https://en.wikipedia.org/wiki/Shabandar_Caf%C3%A9"
+   ]
+  },
+  {
+   "name": "متوسطة الرشيد",
+   "category": "education",
+   "era": null,
+   "built": null,
+   "summary_ar": "مدرسة متوسطة بحسب البيانات. لا تتوافر معلومات تثبت تاريخاً تراثياً للمبنى.",
+   "site_relevance_ar": "تُراعى سلامة عبور الطلبة ومناطق انتظارهم.",
+   "analysis_value": "low",
+   "confidence": "medium"
+  },
+  {
+   "name": "شارع السراي",
+   "category": "street",
+   "era": null,
+   "built": null,
+   "summary_ar": "شارع ضمن مجال السراي التاريخي. ينبغي تمييزه عن سوق السراي عند تمثيل الشبكة على الخريطة.",
+   "site_relevance_ar": "وصلة مهمة بين الأسواق والمباني الثقافية والإدارية التاريخية.",
+   "analysis_value": "high",
+   "confidence": "medium"
+  },
+  {
+   "name": "متوسطة الابطال للبنين",
+   "category": "education",
+   "era": null,
+   "built": null,
+   "summary_ar": "مدرسة للبنين وفق البيانات. لا يتيح الاسم تحديد تاريخ المبنى أو خصائصه المعمارية.",
+   "site_relevance_ar": "تُدرج حركة الطلبة ضمن تصميم المعابر الآمنة.",
+   "analysis_value": "low",
+   "confidence": "medium"
+  },
+  {
+   "name": "مركز دفاع مدني الشورجة",
+   "category": "government",
+   "era": null,
+   "built": null,
+   "summary_ar": "مرفق للدفاع المدني في منطقة الشورجة بحسب الخريطة. وظيفته خدمية ولا تثبت البيانات قيمة تراثية للمبنى.",
+   "site_relevance_ar": "يجب إبقاء وصول مركبات الطوارئ عند تطبيق المشاة.",
+   "analysis_value": "low",
+   "confidence": "medium"
+  },
+  {
+   "name": "متصرفية لواء بغداد",
+   "category": "government",
+   "era": null,
+   "built": null,
+   "summary_ar": "مبنى مرتبط بالإدارة التاريخية لبغداد ضمن مجال السراي. تصنيفه كأطلال في الخريطة يحتاج إلى مطابقة حالته الفعلية.",
+   "site_relevance_ar": "يمكن ربطه بمسار القشلة وذاكرة الإدارة بعد فحص حالته.",
+   "analysis_value": "high",
+   "confidence": "medium"
+  },
+  {
+   "name": "جامع الحيدر خانة",
+   "category": "religious",
+   "era": "عثماني",
+   "built": "أوائل القرن التاسع عشر للبناء المعروف",
+   "summary_ar": "جامع عثماني بارز على شارع الرشيد، ارتبط بالحياة العلمية والعامة في بغداد. يتميز ببناء آجري وقباب ومئذنة.",
+   "site_relevance_ar": "علامة وصول إلى المتنبي ومحطة على المسار الثقافي للرشيد.",
+   "analysis_value": "high",
+   "confidence": "high"
+  },
+  {
+   "name": "شارع الجمهورية",
+   "category": "street",
+   "era": null,
+   "built": null,
+   "summary_ar": "محور مروري وتجاري في وسط بغداد. تتداخل تسميته في بعض البيانات مع شارع الخلفاء، فتجب مراجعة المقاطع.",
+   "site_relevance_ar": "تُدرس عليه نقاط الوصول الطرفي والعبور نحو الأسواق.",
+   "analysis_value": "high",
+   "confidence": "medium"
+  },
+  {
+   "name": "مبنى القشلة",
+   "category": "government",
+   "era": "عثماني",
+   "built": "القرن التاسع عشر",
+   "summary_ar": "ثكنة عثمانية تاريخية ذات أروقة وفناء ارتبطت لاحقاً بالحياة العامة والثقافية. يرد المبنى ضمن ملف معالم ضفة دجلة.",
+   "site_relevance_ar": "امتداد ثقافي ونهري للمثلث وفضاء محتمل للقاء والفعاليات.",
+   "analysis_value": "high",
+   "confidence": "high",
+   "sources": [
+    "https://whc.unesco.org/en/tentativelists/5880/"
+   ]
+  },
+  {
+   "name": "شارع الخلفاء",
+   "category": "street",
+   "era": null,
+   "built": null,
+   "summary_ar": "محور مرتبط بمنطقة جامع الخلفاء والأسواق المحيطة. يلزم تدقيق علاقته المكانية بتسمية شارع الجمهورية في البيانات.",
+   "site_relevance_ar": "يوصل قطب الخلفاء بواجهة الموقع التجارية عبر معابر آمنة.",
+   "analysis_value": "high",
+   "confidence": "medium"
+  },
+  {
+   "name": "ساعة القشلة",
+   "category": "cultural",
+   "era": "عثماني",
+   "built": "القرن التاسع عشر",
+   "summary_ar": "برج ساعة ضمن مجموعة القشلة التاريخية. يمثل علامة بصرية مرتبطة بالمبنى وفنائه، وليس موقعاً مستقلاً عنه.",
+   "site_relevance_ar": "نقطة استدلال ولقاء عند امتداد المشاة من المتنبي إلى النهر.",
+   "analysis_value": "high",
+   "confidence": "high"
+  },
+  {
+   "name": "عمارة الضمان التجارية",
+   "category": "other",
+   "era": null,
+   "built": null,
+   "summary_ar": "عمارة تجارية بحسب اسمها في البيانات. لا تتوافر معلومات تثبت تاريخها أو قيمة معمارية خاصة لها.",
+   "site_relevance_ar": "تُدرس واجهاتها ومداخلها ضمن استمرارية النشاط التجاري.",
+   "analysis_value": "low",
+   "confidence": "medium"
+  },
+  {
+   "name": "جامع الخلفاء",
+   "category": "religious",
+   "era": "جمهوري",
+   "built": "1964 للمبنى الحديث؛ المئذنة من القرن الثالث عشر",
+   "summary_ar": "جامع صممه محمد مكية حول مئذنة سوق الغزل التاريخية. يوثق Archnet الجمع بين المئذنة الآجرية والعمارة الحديثة.",
+   "site_relevance_ar": "قطب ديني ومعماري يوسع الصلة بين الموقع وأسواق الرصافة.",
+   "analysis_value": "high",
+   "confidence": "high",
+   "sources": [
+    "https://www.archnet.org/sites/27"
+   ]
+  },
+  {
+   "name": "جامع المصلوب",
+   "category": "religious",
+   "era": null,
+   "built": null,
+   "summary_ar": "جامع مسجل في محيط الدراسة. لا تتوافر معلومات كافية لتفسير التسمية أو تحديد تاريخ البناء.",
+   "site_relevance_ar": "تُراعى حاجات المصلين ضمن شبكة الوصول المحلية.",
+   "analysis_value": "medium",
+   "confidence": "low"
+  },
+  {
+   "name": "جامع منورة خاتون",
+   "category": "religious",
+   "era": null,
+   "built": null,
+   "summary_ar": "جامع يحمل اسم منورة خاتون في البيانات. تحتاج النسبة ومراحل البناء إلى توثيق مستقل.",
+   "site_relevance_ar": "يمكن إدراجه في قراءة معالم الحي بعد تثبيت هويته.",
+   "analysis_value": "medium",
+   "confidence": "low"
+  },
+  {
+   "name": "جامع حنان",
+   "category": "religious",
+   "era": null,
+   "built": null,
+   "summary_ar": "جامع محلي بحسب الخريطة. لا تتوافر معلومات كافية عن تاريخ بنائه أو عناصره المعمارية.",
+   "site_relevance_ar": "يُراعى الوصول إليه ضمن المسارات اليومية للسكان.",
+   "analysis_value": "medium",
+   "confidence": "low"
+  },
+  {
+   "name": "التوراة",
+   "category": "religious",
+   "era": null,
+   "built": null,
+   "summary_ar": "تسمية مبهمة لنقطة مصنفة مكان عبادة. لا تكفي لتحديد كنيس أو مؤسسة دينية بعينها.",
+   "site_relevance_ar": "تبقى نقطة تحقق ولا تُعتمد محطة تراثية قبل تعريفها.",
+   "analysis_value": "low",
+   "confidence": "low"
+  },
+  {
+   "name": "جامع الملك غازي",
+   "category": "religious",
+   "era": null,
+   "built": null,
+   "summary_ar": "جامع مسجل باسم الملك غازي. الاسم وتصنيف الموقع الأثري لا يثبتان وحدهما تاريخ البناء أو أصالته.",
+   "site_relevance_ar": "يُفحص ضمن معالم الحي قبل إدخاله في مسار تراثي.",
+   "analysis_value": "medium",
+   "confidence": "low"
+  },
+  {
+   "name": "متوسطة الرصافة",
+   "category": "education",
+   "era": null,
+   "built": null,
+   "summary_ar": "مدرسة متوسطة وفق الخريطة. ينبغي التحقق من استقلالها عن المدارس الأخرى المتشابهة في الاسم.",
+   "site_relevance_ar": "تؤخذ حركة الطلبة في حساب المعابر ومسارات الوصول.",
+   "analysis_value": "low",
+   "confidence": "medium"
+  },
+  {
+   "name": "بيوت اساتذة مدرسة الاليانس اليهودية",
+   "category": "heritage_house",
+   "era": null,
+   "built": null,
+   "summary_ar": "مجموعة بيوت منسوبة في البيانات إلى أساتذة مدرسة الأليانس. تحتاج حدود المجموعة ونسبتها وبقاء مبانيها إلى توثيق.",
+   "site_relevance_ar": "مرشحة لمسار ذاكرة التعليم والسكن بعد التحقق الميداني.",
+   "analysis_value": "medium",
+   "confidence": "low"
+  },
+  {
+   "name": "عمارة ريجينة مردخاي",
+   "category": "other",
+   "era": null,
+   "built": null,
+   "summary_ar": "عمارة تحمل اسم ريجينة مردخاي في البيانات. لا يُفترض أنها الدار التراثية المسجلة باسم مشابه.",
+   "site_relevance_ar": "تُقارن بالدار الأخرى لتجنب ازدواج المعالم وإحصاء المساحات.",
+   "analysis_value": "medium",
+   "confidence": "low"
+  },
+  {
+   "name": "قصر الوالي العثماني",
+   "category": "palace",
+   "era": null,
+   "built": null,
+   "summary_ar": "تسمية لمبنى منسوب إلى الوالي العثماني. يلزم تحديد علاقته بمجموعة السراي قبل تأريخه أو وصف عمارته.",
+   "site_relevance_ar": "مرشح ضمن مسار الإدارة التاريخية والقشلة بعد تثبيت الهوية.",
+   "analysis_value": "medium",
+   "confidence": "low"
+  },
+  {
+   "name": "مكتبة الرشيد",
+   "category": "cultural",
+   "era": null,
+   "built": null,
+   "summary_ar": "مكتبة مسجلة بهذا الاسم. لا تحدد البيانات طبيعة مجموعاتها أو إتاحتها للجمهور أو تاريخ مبناها.",
+   "site_relevance_ar": "يمكن وصلها بمسار الكتاب بعد التحقق من وظيفتها.",
+   "analysis_value": "low",
+   "confidence": "medium"
+  },
+  {
+   "name": "مدرسة منشي صالح اليهودية",
+   "category": "education",
+   "era": null,
+   "built": null,
+   "summary_ar": "مدرسة منسوبة إلى منشي صالح في الخريطة. تحتاج هويتها التاريخية وحالة مبناها إلى توثيق.",
+   "site_relevance_ar": "تفيد في قراءة ذاكرة التعليم اليهودي بعد تثبيت النسبة.",
+   "analysis_value": "medium",
+   "confidence": "low"
+  },
+  {
+   "name": "دار ريجينة مردخاي التراثي",
+   "category": "heritage_house",
+   "era": null,
+   "built": null,
+   "summary_ar": "دار موصوفة بالتراثية ومنسوبة إلى ريجينة مردخاي. لا تكفي البيانات لتحديد تاريخها أو مكوناتها المعمارية الباقية.",
+   "site_relevance_ar": "مرشحة لدراسة السكن وإعادة الاستخدام مع تدقيق الملكية والحالة.",
+   "analysis_value": "medium",
+   "confidence": "low"
+  },
+  {
+   "name": "الحمام المالح",
+   "category": "bath",
+   "era": null,
+   "built": null,
+   "summary_ar": "اسم حمام تاريخي ومحلة في بغداد القديمة. يلزم التأكد من أن النقطة تمثل مبنى الحمام لا اسم المنطقة فقط.",
+   "site_relevance_ar": "يفيد في قراءة الخدمات الاجتماعية ونسيج الأزقة بعد التحقق.",
+   "analysis_value": "medium",
+   "confidence": "medium"
+  },
+  {
+   "name": "مدرسة الهيثمية الابتدائية للبنين",
+   "category": "education",
+   "era": null,
+   "built": null,
+   "summary_ar": "مدرسة ابتدائية للبنين بحسب البيانات. لا تتوافر معلومات عن تاريخ المبنى أو قيمته التراثية.",
+   "site_relevance_ar": "تُعطى سلامة الأطفال أولوية في العبور والوصول.",
+   "analysis_value": "low",
+   "confidence": "medium"
+  },
+  {
+   "name": "مبنى مديرية الشرطة سابقاً",
+   "category": "government",
+   "era": null,
+   "built": null,
+   "summary_ar": "مبنى منسوب إلى استعمال سابق لمديرية الشرطة. لا تحدد التسمية عمره أو وظيفته الحالية.",
+   "site_relevance_ar": "تُدرس علاقته بالمجموعة الإدارية التاريخية بعد التوثيق.",
+   "analysis_value": "medium",
+   "confidence": "low"
+  },
+  {
+   "name": "جامع النخيلة",
+   "category": "religious",
+   "era": null,
+   "built": null,
+   "summary_ar": "جامع مسجل ضمن محيط الدراسة. ينبغي تثبيت هويته وعدم نقل معلومات جوامع أخرى تحمل الاسم نفسه إليه.",
+   "site_relevance_ar": "تُراعى وظيفته المحلية بعد مطابقة الموقع ميدانياً.",
+   "analysis_value": "medium",
+   "confidence": "low"
+  },
+  {
+   "name": "مدرسة الكفاح",
+   "category": "education",
+   "era": null,
+   "built": null,
+   "summary_ar": "مدرسة مسجلة باسم الكفاح. لا تتوافر معلومات تثبت قيمة تراثية خاصة لمبناها.",
+   "site_relevance_ar": "تُدرج احتياجات الطلبة ضمن تحسين المشي في الحي.",
+   "analysis_value": "low",
+   "confidence": "medium"
+  },
+  {
+   "name": "معبد يهودي",
+   "category": "religious",
+   "era": null,
+   "built": null,
+   "summary_ar": "تسمية عامة لموضع عبادة يهودي. لا تحدد الاسم التاريخي أو تاريخ المبنى أو حالته.",
+   "site_relevance_ar": "يُراجع احتمال تكراره مع نقاط الكنس قبل بناء مسار الزيارة.",
+   "analysis_value": "medium",
+   "confidence": "low"
+  },
+  {
+   "name": "بناية خزينة الدولة",
+   "category": "government",
+   "era": null,
+   "built": null,
+   "summary_ar": "مبنى تحمل تسميته وظيفة خزينة الدولة. لا تثبت البيانات استمرار الوظيفة أو تاريخ الإنشاء.",
+   "site_relevance_ar": "يُفحص ضمن قراءة المباني الإدارية المحيطة بالسراي.",
+   "analysis_value": "medium",
+   "confidence": "low"
+  },
+  {
+   "name": "وزارة العدل",
+   "category": "government",
+   "era": null,
+   "built": null,
+   "summary_ar": "نقطة تحمل اسم وزارة العدل. لا توضح البيانات إن كانت مقراً حالياً أو تاريخياً أو تسمية غير محدثة.",
+   "site_relevance_ar": "يُثبت موضعها واستعمالها قبل احتساب علاقتها بمسارات الموقع.",
+   "analysis_value": "low",
+   "confidence": "low"
+  },
+  {
+   "name": "جامع الجيبه جي",
+   "category": "religious",
+   "era": null,
+   "built": null,
+   "summary_ar": "جامع مسجل بهذه الصيغة الاسمية. يحتاج ضبط الاسم وتاريخ المبنى إلى توثيق قبل إسناد رواية تاريخية إليه.",
+   "site_relevance_ar": "تُراعى وظيفته الدينية المحلية ضمن شبكة المشاة.",
+   "analysis_value": "medium",
+   "confidence": "low"
+  },
+  {
+   "name": "مرقد الحاخام إسحاق جاؤون",
+   "category": "religious",
+   "era": null,
+   "built": null,
+   "summary_ar": "موضع منسوب في الخريطة إلى مرقد الحاخام إسحاق جاؤون. لا تكفي البيانات لتأكيد النسبة أو تاريخ البناء.",
+   "site_relevance_ar": "مرشح لتوثيق الذاكرة الدينية مع احترام حرمة المكان.",
+   "analysis_value": "medium",
+   "confidence": "low"
+  },
+  {
+   "name": "ضريح قنبر علي",
+   "category": "religious",
+   "era": null,
+   "built": null,
+   "summary_ar": "موضع ديني مرتبط بتسمية قنبر علي في بغداد. لا يُجزم بهوية صاحب الضريح أو زمن البناء دون مصدر مختص.",
+   "site_relevance_ar": "يساعد على فهم ارتباط المعالم الدينية بأسماء المحلات.",
+   "analysis_value": "medium",
+   "confidence": "medium"
+  },
+  {
+   "name": "التكية البكداشية",
+   "category": "religious",
+   "era": null,
+   "built": null,
+   "summary_ar": "موضع تسميه البيانات التكية البكداشية. يحتاج ضبط النسبة والطريقة المرتبطة به وبقاء المبنى إلى تحقق.",
+   "site_relevance_ar": "يمكن إدراجه في ذاكرة المؤسسات الدينية بعد توثيقه.",
+   "analysis_value": "medium",
+   "confidence": "low"
+  },
+  {
+   "name": "مسجد نجيب السهروردي",
+   "category": "religious",
+   "era": null,
+   "built": null,
+   "summary_ar": "مسجد مسجل باسم نجيب السهروردي. لا تكفي التسمية لتحديد مؤسسه أو تاريخ عمارته.",
+   "site_relevance_ar": "تُراعى مداخله وحركة المصلين في تحسين الأزقة المحيطة.",
+   "analysis_value": "medium",
+   "confidence": "low"
+  },
+  {
+   "name": "سوق هرج",
+   "category": "market",
+   "era": null,
+   "built": null,
+   "summary_ar": "سوق بغدادي معروف بالمقتنيات والأدوات المستعملة والقديمة. تكمن قيمته في التبادل الشعبي وذاكرة الأشياء والحرف.",
+   "site_relevance_ar": "امتداد تجاري لمسار المتنبي والميدان يدعم المشي والاكتشاف.",
+   "analysis_value": "high",
+   "confidence": "high"
+  },
+  {
+   "name": "بيت الحكمة",
+   "category": "cultural",
+   "era": null,
+   "built": null,
+   "summary_ar": "مؤسسة بحثية عراقية معاصرة تحمل اسم بيت الحكمة. لا تعني التسمية أنها مبنى بيت الحكمة العباسي أو موقعه الأصلي.",
+   "site_relevance_ar": "شريك محتمل لبرامج المعرفة المرتبطة بالمتنبي والتراث.",
+   "analysis_value": "medium",
+   "confidence": "high"
+  },
+  {
+   "name": "شارع الملك غازي",
+   "category": "street",
+   "era": null,
+   "built": null,
+   "summary_ar": "شارع مسجل باسم الملك غازي. يحتمل ارتباطه بتسمية شارع غازي، وتحتاج العلاقة بين المقطعين إلى مطابقة.",
+   "site_relevance_ar": "تُدرس صلته بالأحياء الداخلية دون مضاعفة المسار على الخريطة.",
+   "analysis_value": "medium",
+   "confidence": "medium"
+  },
+  {
+   "name": "دار المخطوطات",
+   "category": "cultural",
+   "era": null,
+   "built": null,
+   "summary_ar": "تسمية لمؤسسة معنية بالمخطوطات. تحتاج هوية المقر المشار إليه ومجموعاته وإتاحته للزوار إلى تحقق.",
+   "site_relevance_ar": "تدعم موضوع الكتاب والذاكرة عند تثبيت الموقع وإمكان الزيارة.",
+   "analysis_value": "medium",
+   "confidence": "medium"
+  },
+  {
+   "name": "مفتشية اثار بغداد",
+   "category": "government",
+   "era": null,
+   "built": null,
+   "summary_ar": "جهة إدارية معنية بآثار بغداد بحسب الاسم. تصنيفها مكتبة في البيانات لا يكفي لإثبات هذه الوظيفة.",
+   "site_relevance_ar": "جهة تنسيق محتملة لتوثيق المباني وتقييم التدخلات التراثية.",
+   "analysis_value": "low",
+   "confidence": "medium"
+  },
+  {
+   "name": "حمام الباشا التاريخي",
+   "category": "bath",
+   "era": null,
+   "built": null,
+   "summary_ar": "حمام موصوف بالتاريخي في الخريطة. يحتاج تحديد عمارته الباقية وتاريخها ووظيفتها الحالية إلى مسح.",
+   "site_relevance_ar": "مرشح لشرح خدمات المدينة القديمة وإعادة الاستخدام الملائمة.",
+   "analysis_value": "medium",
+   "confidence": "medium"
+  },
+  {
+   "name": "جامع الاحمدية",
+   "category": "religious",
+   "era": "عثماني",
+   "built": null,
+   "summary_ar": "جامع تاريخي في منطقة الميدان، معروف أيضاً بالأحمدي. يرتبط بنسيج ديني وتعليمي وتجاري متراكم.",
+   "site_relevance_ar": "محطة على امتداد المتنبي نحو الميدان والأسواق الشمالية.",
+   "analysis_value": "high",
+   "confidence": "medium"
+  },
+  {
+   "name": "فندق المنصور ميليا",
+   "category": "other",
+   "era": "جمهوري",
+   "built": "سبعينيات القرن العشرين؛ افتتح عام 1980",
+   "summary_ar": "فندق على ضفة الكرخ قرب جسر السنك، وفق هيئة السياحة. لا يقع ضمن النسيج الداخلي للرصافة.",
+   "site_relevance_ar": "يُدرس في المشهد المقابل؛ المسافة المستقيمة لا تمثل وصولاً مشياً.",
+   "analysis_value": "low",
+   "confidence": "high",
+   "sources": [
+    "https://tourism.gov.iq/common/files/manshourat/manshour1692596618.pdf"
+   ]
+  },
+  {
+   "name": "الجمعية العراقية للطوابع والمسكوكات",
+   "category": "cultural",
+   "era": null,
+   "built": null,
+   "summary_ar": "جمعية تهتم بالطوابع والمسكوكات. لا يقدم الاسم دليلاً على تاريخ مبنى المقر أو إتاحته للجمهور.",
+   "site_relevance_ar": "يمكن إشراكها في عروض الذاكرة البصرية وتاريخ التداول.",
+   "analysis_value": "low",
+   "confidence": "medium"
+  },
+  {
+   "name": "ديوان الرقابة المالية الاتحادي",
+   "category": "government",
+   "era": null,
+   "built": null,
+   "summary_ar": "جهة حكومية للرقابة المالية. لا تحدد البيانات تاريخ المبنى المشار إليه أو قيمته التراثية.",
+   "site_relevance_ar": "تؤخذ حركة العاملين والخدمة في حساب تنظيم الوصول.",
+   "analysis_value": "low",
+   "confidence": "medium"
+  },
+  {
+   "name": "الاعدادية المركزية للبنين",
+   "category": "education",
+   "era": null,
+   "built": null,
+   "summary_ar": "مؤسسة تعليمية عريقة في بغداد. يجب الفصل بين تاريخ المدرسة وتاريخ مبناها القائم ومراحل تعديله.",
+   "site_relevance_ar": "تضيف بعداً تعليمياً لمسار الميدان مع تأمين حركة الطلبة.",
+   "analysis_value": "medium",
+   "confidence": "medium"
+  },
+  {
+   "name": "شارع غازي",
+   "category": "street",
+   "era": null,
+   "built": null,
+   "summary_ar": "تسمية تاريخية مرتبطة بمحور شارع الكفاح. يلزم مطابقة المقطع مع شارع الملك غازي المسجل في القائمة.",
+   "site_relevance_ar": "امتداد محتمل نحو الأحياء الداخلية بعد تدقيق شبكة الشوارع.",
+   "analysis_value": "medium",
+   "confidence": "medium"
+  },
+  {
+   "name": "شارع الميدان",
+   "category": "street",
+   "era": null,
+   "built": null,
+   "summary_ar": "شارع في منطقة الميدان التاريخية شمال المجال الثقافي للمتنبي. يرتبط بمحيط أسواق ومبانٍ دينية وإدارية.",
+   "site_relevance_ar": "يوسع شبكة المشي إلى سوق هرج ومعالم الميدان.",
+   "analysis_value": "high",
+   "confidence": "medium"
+  },
+  {
+   "name": "جامع الفضل",
+   "category": "religious",
+   "era": null,
+   "built": null,
+   "summary_ar": "جامع مرتبط بمحلة الفضل البغدادية. يلزم التحقق من كونه المعلم نفسه المسجل باسم جامع الفضل الكبير.",
+   "site_relevance_ar": "يدعم قراءة مركز المحلة ومسارات السكان بعد إزالة التكرار المحتمل.",
+   "analysis_value": "medium",
+   "confidence": "medium"
+  },
+  {
+   "name": "مكتبة بيت الحكمة",
+   "category": "cultural",
+   "era": null,
+   "built": null,
+   "summary_ar": "مكتبة تحمل اسم بيت الحكمة. يحتمل أنها جزء من المؤسسة المسجلة بالاسم نفسه، لا موقعاً ثقافياً مستقلاً.",
+   "site_relevance_ar": "تُربط بمسار المعرفة بعد تثبيت تبعيتها وإتاحتها.",
+   "analysis_value": "low",
+   "confidence": "medium"
+  },
+  {
+   "name": "جامع الفضل الكبير",
+   "category": "religious",
+   "era": null,
+   "built": null,
+   "summary_ar": "جامع مسجل ضمن محلة الفضل. يحتاج تمييزه عن نقطة جامع الفضل إلى مطابقة المبنى والمداخل.",
+   "site_relevance_ar": "يُحسب قطباً واحداً إذا ثبت تطابق التسميتين.",
+   "analysis_value": "medium",
+   "confidence": "medium"
+  },
+  {
+   "name": "كنيس إلياهو",
+   "category": "religious",
+   "era": null,
+   "built": null,
+   "summary_ar": "كنيس مسجل باسم إلياهو في البيانات. لا تتوافر معلومات كافية لتحديد تاريخه أو حالته أو استقلاله عن نقاط أخرى.",
+   "site_relevance_ar": "مرشح لمسار الذاكرة اليهودية بعد التحقق من الهوية والبقاء.",
+   "analysis_value": "medium",
+   "confidence": "low"
+  },
+  {
+   "name": "مركز شرطة باب المعظم",
+   "category": "government",
+   "era": null,
+   "built": null,
+   "summary_ar": "مرفق شرطة بحسب بيانات الخريطة. لا توجد معلومات تثبت قيمة تراثية خاصة للمبنى.",
+   "site_relevance_ar": "تُراعى احتياجات الخدمة والوصول عند تخطيط امتدادات المشاة.",
+   "analysis_value": "low",
+   "confidence": "medium"
+  },
+  {
+   "name": "شبكة الاعلام العراقي",
+   "category": "other",
+   "era": null,
+   "built": null,
+   "summary_ar": "نقطة مكتبية مرتبطة بشبكة الإعلام العراقي بحسب البيانات. لا تحدد التسمية وظيفة المبنى الدقيقة أو تاريخ إنشائه.",
+   "site_relevance_ar": "تُدرس كاستعمال مكتبي ضمن حركة الوصول اليومية.",
+   "analysis_value": "low",
+   "confidence": "medium"
+  },
+  {
+   "name": "متوسطة الرصافة للبنات",
+   "category": "education",
+   "era": null,
+   "built": null,
+   "summary_ar": "مدرسة متوسطة للبنات وفق الخريطة. تحتاج مطابقة موقعها مع المدرسة الأخرى المسماة متوسطة الرصافة.",
+   "site_relevance_ar": "تُراعى سلامة الطالبات ومناطق الانتظار والعبور.",
+   "analysis_value": "low",
+   "confidence": "medium"
+  },
+  {
+   "name": "القصر العباسي",
+   "category": "palace",
+   "era": "عباسي",
+   "built": "العصر العباسي المتأخر",
+   "summary_ar": "معلم آجري ذو فناء وإيوان وزخارف بارزة على ضفة دجلة. وظيفته الأصلية محل نقاش، ويُعرض ضمن ملف معالم الضفة.",
+   "site_relevance_ar": "وجهة لامتداد المسار النهري والثقافي شمال القشلة.",
+   "analysis_value": "high",
+   "confidence": "high",
+   "sources": [
+    "https://whc.unesco.org/en/tentativelists/5880/"
+   ]
+  },
+  {
+   "name": "كنيسة القديسة مريم العذراء",
+   "category": "religious",
+   "era": null,
+   "built": null,
+   "summary_ar": "كنيسة مسجلة باسم القديسة مريم العذراء. تشابه الاسم مع كنيسة الكرمليين لا يثبت اتحادهما.",
+   "site_relevance_ar": "تُدرج في قراءة التنوع الديني بعد تثبيت الطائفة والموقع.",
+   "analysis_value": "medium",
+   "confidence": "low"
+  },
+  {
+   "name": "مقهى الدليمي التراثي",
+   "category": "cafe",
+   "era": null,
+   "built": null,
+   "summary_ar": "مقهى يحمل وصف التراثي في اسمه. لا يكفي هذا الوصف لتحديد عمر المنشأة أو أصالة المبنى.",
+   "site_relevance_ar": "محطة استراحة محتملة ضمن امتداد المشاة بعد التحقق من نشاطه.",
+   "analysis_value": "low",
+   "confidence": "medium"
+  },
+  {
+   "name": "كنيسة مسكنتة",
+   "category": "religious",
+   "era": null,
+   "built": null,
+   "summary_ar": "كنيسة تحمل اسم مسكنتة ضمن بيانات المنطقة. تُترك تفاصيل تاريخها وعناصرها المعمارية لحين التوثيق.",
+   "site_relevance_ar": "تدعم فهم تعدد المجتمعات الدينية في بغداد القديمة.",
+   "analysis_value": "medium",
+   "confidence": "medium"
+  },
+  {
+   "name": "جامع المصرف",
+   "category": "religious",
+   "era": null,
+   "built": null,
+   "summary_ar": "جامع مسجل بهذا الاسم في محيط الدراسة. لا تتوافر معلومات كافية لتحديد تاريخه أو تفسير تسميته.",
+   "site_relevance_ar": "تُراعى مداخله ضمن شبكة الوصول المحلية.",
+   "analysis_value": "medium",
+   "confidence": "low"
+  },
+  {
+   "name": "جامع المرادية",
+   "category": "religious",
+   "era": "عثماني",
+   "built": null,
+   "summary_ar": "جامع تاريخي عثماني في منطقة الميدان. يمثل إحدى طبقات العمارة الدينية في شمال الرصافة القديمة.",
+   "site_relevance_ar": "محطة في امتداد الزيارة من المتنبي والميدان نحو باب المعظم.",
+   "analysis_value": "high",
+   "confidence": "medium"
+  },
+  {
+   "name": "وزارة الدفاع القديمة",
+   "category": "government",
+   "era": null,
+   "built": null,
+   "summary_ar": "تسمية لمجمع وزارة الدفاع السابق في باب المعظم. ينبغي تمييز حدود المجمع عن مباني رئاسة الأركان المسجلة منفصلة.",
+   "site_relevance_ar": "حد عمراني مهم للامتداد الشمالي، ولا يُفترض انفتاحه للعبور.",
+   "analysis_value": "medium",
+   "confidence": "medium"
+  },
+  {
+   "name": "سينما بغداد",
+   "category": "cultural",
+   "era": null,
+   "built": null,
+   "summary_ar": "موقع مصنف سينما في الخريطة. لا تؤكد البيانات استمرار العرض أو تاريخ القاعة أو بقاء تجهيزاتها.",
+   "site_relevance_ar": "مرشح لدراسة ذاكرة الترفيه وإمكان إعادة الاستخدام بعد المسح.",
+   "analysis_value": "low",
+   "confidence": "medium"
+  },
+  {
+   "name": "رئاسة اركان الجيش",
+   "category": "government",
+   "era": null,
+   "built": null,
+   "summary_ar": "تسمية لمبنى أو جزء من مجمع عسكري. قد تتداخل مع نقطة وزارة الدفاع ورئاسة الأركان الأخرى في القائمة.",
+   "site_relevance_ar": "تُثبت الحدود والمداخل قبل إدراجه في تحليل اتصال المشاة.",
+   "analysis_value": "low",
+   "confidence": "low"
+  },
+  {
+   "name": "وزارة الدفاع (رئاسة اركان الجيش)",
+   "category": "government",
+   "era": null,
+   "built": null,
+   "summary_ar": "تسمية تجمع وزارة الدفاع ورئاسة الأركان. يحتمل أنها تمثل جزءاً من المجمع القديم أو تكراراً له.",
+   "site_relevance_ar": "تُراجع مع النقطتين المتشابهتين لتجنب تضخيم عدد المعالم.",
+   "analysis_value": "medium",
+   "confidence": "low"
+  },
+  {
+   "name": "جامع الأزبك",
+   "category": "religious",
+   "era": "عثماني",
+   "built": null,
+   "summary_ar": "جامع تاريخي في محيط باب المعظم. يرتبط بطبقة المعالم العثمانية في شمال بغداد القديمة.",
+   "site_relevance_ar": "محطة ثانوية لامتداد المسار الديني نحو باب المعظم.",
+   "analysis_value": "medium",
+   "confidence": "medium"
+  },
+  {
+   "name": "سور بغداد التاريخي",
+   "category": "other",
+   "era": null,
+   "built": null,
+   "summary_ar": "نقطة مسجلة بوصفها سوراً تاريخياً. يجب تحديد البقايا المقصودة وعصرها؛ فلا تُنسب تلقائياً إلى سور المدينة المدورة.",
+   "site_relevance_ar": "تفيد في قراءة حدود المدينة بعد التحقق الأثري من موضعها.",
+   "analysis_value": "medium",
+   "confidence": "low"
+  },
+  {
+   "name": "قاعة الملك فيصل الثاني",
+   "category": "cultural",
+   "era": null,
+   "built": null,
+   "summary_ar": "قاعة مسجلة باسم الملك فيصل الثاني ومصنفة مسرحاً. الاسم لا يكفي لتحديد تاريخ بنائها أو وظيفتها الحالية.",
+   "site_relevance_ar": "مرشحة كوجهة ثقافية ثانوية إذا ثبتت هويتها وإتاحتها.",
+   "analysis_value": "low",
+   "confidence": "low"
+  },
+  {
+   "name": "وزارة الاوقاف",
+   "category": "government",
+   "era": null,
+   "built": null,
+   "summary_ar": "نقطة تحمل اسم وزارة الأوقاف. قد تكون تسمية إدارية تاريخية، ولا تؤكد إشغال المبنى حالياً.",
+   "site_relevance_ar": "تُثبت وظيفتها قبل احتساب حركة المراجعين أو قيمة المبنى.",
+   "analysis_value": "low",
+   "confidence": "low"
+  },
+  {
+   "name": "مقهى باب المعظم",
+   "category": "cafe",
+   "era": null,
+   "built": null,
+   "summary_ar": "مقهى مسجل في منطقة باب المعظم. لا تتوافر معلومات تثبت تاريخاً تراثياً للمكان.",
+   "site_relevance_ar": "خدمة استراحة محتملة على امتداد المشي الشمالي.",
+   "analysis_value": "low",
+   "confidence": "medium"
+  },
+  {
+   "name": "جامع سعد بن ابي وقاص",
+   "category": "religious",
+   "era": null,
+   "built": null,
+   "summary_ar": "جامع يحمل اسم سعد بن أبي وقاص. لا يدل الاسم على صلة تاريخية مباشرة بالشخصية أو على عصر البناء.",
+   "site_relevance_ar": "تُراعى وظيفته المحلية ضمن امتدادات شبكة المشاة.",
+   "analysis_value": "medium",
+   "confidence": "low"
+  },
+  {
+   "name": "شارع الشيخ عمر",
+   "category": "street",
+   "era": null,
+   "built": null,
+   "summary_ar": "محور معروف في الرصافة يرتبط بمناطق عمل وتجارة. لا تكفي البيانات لوصف استعمالات المقطع المحدد كلها.",
+   "site_relevance_ar": "صلة خارجية محتملة تُدرس وفق حركة الخدمة ومسافة المشي الفعلية.",
+   "analysis_value": "medium",
+   "confidence": "medium"
+  },
+  {
+   "name": "شارع الامام الاعظم ابو حنيفة النعمان",
+   "category": "street",
+   "era": null,
+   "built": null,
+   "summary_ar": "مقطع طريق رابط يحمل هذا الاسم في البيانات. لا تعني النقطة قرب جامع الإمام الأعظم أو وقوعه ضمن مجال الدراسة.",
+   "site_relevance_ar": "يفيد في تحليل الوصول الأوسع بعد تثبيت المقطع واتجاهاته.",
+   "analysis_value": "low",
+   "confidence": "medium"
+  },
+  {
+   "name": "وزارة الصحة والبيئة",
+   "category": "government",
+   "era": null,
+   "built": null,
+   "summary_ar": "نقطة مكتبية تحمل اسماً وزارياً في الخريطة. قد تعكس تسمية سابقة، ولا تحدد عمر المبنى أو إشغاله الحالي.",
+   "site_relevance_ar": "تُدرس كمولد محتمل للحركة عند حدود مجال التحليل.",
+   "analysis_value": "low",
+   "confidence": "medium"
+  }
+ ],
+ "missing_places": [
+  {
+   "name": "جسر الشهداء",
+   "why_ar": "يكمل تعريف حدود الموقع ويشكل بوابة اتصال بالكرخ ومفصلاً لوصول المشاة إلى الضفة.",
+   "where_ar": "عند الطرف الشمالي الغربي للموقع، قرب المستنصرية ومجال السراي.",
+   "confidence": "high"
+  },
+  {
+   "name": "سوق الشورجة",
+   "why_ar": "قطب تجارة رئيسي يفسر حركة البضائع والعمال والمتسوقين؛ ربطه بالمشروع يتطلب تنظيم الخدمة إلى جانب المشاة.",
+   "where_ar": "إلى الداخل من شارع الرشيد، قرب جامع مرجان وباتجاه محور الجمهورية والخلفاء.",
+   "confidence": "high"
+  },
+  {
+   "name": "المركز الثقافي البغدادي",
+   "why_ar": "وجهة للندوات والمعارض تدعم المثلث الثقافي؛ توثق [نبذته الرسمية](https://babaghdad.com/en/%D9%85%D9%86-%D9%86%D8%AD%D9%86/) فناء المبنى وأروقته.",
+   "where_ar": "في مجال المتنبي والسراي، مقابل الباب الجنوبي للقشلة.",
+   "confidence": "high"
+  },
+  {
+   "name": "تمثال المتنبي",
+   "why_ar": "علامة لقاء تربط هوية شارع الكتب بالمشهد النهري، وتساعد على تعريف نهاية المسار الثقافي.",
+   "where_ar": "عند النهاية النهرية لشارع المتنبي على ضفة دجلة.",
+   "confidence": "high"
+  }
+ ],
+ "axes": [
+  {
+   "name_ar": "من المدرسة إلى سوق الكتاب",
+   "from": "المدرسة المستنصرية",
+   "to": "شارع المتنبي",
+   "via": [
+    "سوق السراي"
+   ],
+   "type": "ثقافي",
+   "rationale_ar": "يربط التعليم التاريخي باقتصاد الورق والقراءة عبر شبكة المشاة القائمة. يُحافظ على نشاط الدكاكين وتُعالج نقاط الاختناق والتظليل."
+  },
+  {
+   "name_ar": "الرشيد بين الثقافة والتجارة",
+   "from": "شارع المتنبي",
+   "to": "خان مرجان الاثري",
+   "via": [
+    "شارع الرشيد",
+    "جامع مرجان"
+   ],
+   "type": "تجاري",
+   "rationale_ar": "يستثمر واجهات الرشيد وأروقته لربط قطب الكتب بقطب مرجان. تُنظم المعابر والتحميل وتُوصل المداخل التجارية بمسار مشاة مستمر."
+  },
+  {
+   "name_ar": "الحرفة نحو المستنصرية",
+   "from": "خان مرجان الاثري",
+   "to": "المدرسة المستنصرية",
+   "via": [
+    "سوق الصفافير"
+   ],
+   "type": "مشاة",
+   "rationale_ar": "يغلق الضلع الثالث للمثلث عبر وصلة مقترحة تمر بمجال الحرف والأسواق. يُختار مسار الأزقة بعد المسح دون شق نسيج جديد أو إزاحة الورش."
+  },
+  {
+   "name_ar": "التنفس على دجلة",
+   "from": "جسر الأحرار",
+   "to": "مبنى القشلة",
+   "via": [
+    "شارع النهر",
+    "المدرسة المستنصرية"
+   ],
+   "type": "نهري",
+   "rationale_ar": "يربط الكورنيش المقترح بمداخل الأسواق والمعالم عبر وصلات عرضية. يسنده الترام المقترح على شارع النهر، مع معالجة الانقطاعات وفصل حركة الصعود عن ممشى الضفة."
+  },
+  {
+   "name_ar": "من المتنبي إلى الضفة التاريخية",
+   "from": "شارع المتنبي",
+   "to": "القصر العباسي",
+   "via": [
+    "مبنى القشلة"
+   ],
+   "type": "ثقافي",
+   "rationale_ar": "يمد تأثير المثلث إلى القشلة ثم القصر عبر وصلات مشاة تُثبت ميدانياً. يتيح تسلسلاً بين الكتاب والفضاء العام والعمارة التاريخية دون افتراض فتح جميع العقارات."
+  },
+  {
+   "name_ar": "مرجان والخلفاء عبر الأسواق",
+   "from": "جامع مرجان",
+   "to": "جامع الخلفاء",
+   "via": [],
+   "type": "ديني",
+   "rationale_ar": "يربط معلمين دينيين بطبقات معمارية مختلفة عبر شبكة الأسواق. يُحدد المسار وفق المعابر المتاحة مع احترام حركة الصلاة وخدمة المحال."
+  },
+  {
+   "name_ar": "من حافة الوصول إلى الداخل",
+   "from": "شارع الجمهورية",
+   "to": "خان مرجان الاثري",
+   "via": [],
+   "type": "مشاة",
+   "rationale_ar": "وصلة مقترحة بين النقل والوصول الطرفي وداخل الموقع. تُختبر مواقع المواقف خارج النسيج التراثي وفق السعة والملكية، ثم تُستكمل الرحلة مشياً."
+  }
+ ],
+ "triangle": {
+  "vertices": [
+   "المدرسة المستنصرية",
+   "شارع المتنبي",
+   "خان مرجان الاثري"
+  ],
+  "concept_ar": "يقترح المثلث ثلاثة أقطاب متكاملة: المستنصرية للمعرفة والضفة، والمتنبي للكتاب واللقاء، وخان مرجان للتجارة والتراث. أضلاعه مسارات مشاة عبر السراي والرشيد والأسواق، وليست خطوطاً مستقيمة تُشق داخل النسيج. تتفرع منه وصلات إلى القشلة والكورنيش، فيتحقق مفهوم «التنفس» بإتاحة النهر وتخفيف السيارات مع إبقاء خدمة السكان والتجار والطوارئ. تُنقل المواقف إلى مواقع طرفية مناسبة ويُدرس ترام شارع النهر، مع التظليل والجلوس وإتاحة الحركة للجميع دون هدم النسيج لصناعة فراغات جديدة."
+ },
+ "corrections": [
+  {
+   "name": "مقهى الشابندر",
+   "field": "era/built",
+   "was": "عثماني",
+   "now": "1917",
+   "source": "https://en.wikipedia.org/wiki/Shabandar_Caf%C3%A9"
+  }
+ ]
+}

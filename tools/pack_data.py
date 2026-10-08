@@ -9,8 +9,8 @@ import json, os
 
 D = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data')
 KEEP = {
-    'heritage': ('id', 'area_m2', 'courtyard', 'floors', 'height_m'),
-    'buildings': ('id', 'area_m2', 'courtyard', 'floors', 'height_m'),
+    'heritage': ('id', 'area_m2', 'courtyard', 'floors', 'height_m', 'name', 'osm_kind', 'street', 'street_kind', 'street_w', 'near', 'near_d', 'block', 'perim_m'),
+    'buildings': ('id', 'area_m2', 'courtyard', 'floors', 'height_m', 'name', 'osm_kind', 'street', 'street_kind', 'street_w', 'near', 'near_d', 'block', 'perim_m'),
     'streets': ('type', 'kind', 'width_m', 'length_m', 'name'),
     'site': ('name',),
     'landmarks': ('name', 'name_en', 'kind'),

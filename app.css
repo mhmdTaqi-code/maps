@@ -274,3 +274,7 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
 .lightbox .lb-dl { position: absolute; top: calc(14px + env(safe-area-inset-top, 0px)); left: 14px; border: 0; background: rgba(255,255,255,.15); color: #fff; border-radius: 999px; padding: 6px 12px; font-size: 13px; cursor: pointer; }
 .leaflet-tooltip.lbl-street { background: rgba(60, 40, 0, .78); color: #ffe7a8; font-size: 10.5px; }
 .z-lt17 .lbl-street { display: none; }
+
+/* ---------- places & axes ---------- */
+.place-pin { border-radius: 50%; border: 2.5px solid #fff; box-shadow: 0 1px 5px rgba(0,0,0,.5); cursor: pointer; }
+.leaflet-tooltip.lbl-axis { background: rgba(90, 20, 140, .85); color: #fff; font-size: 11px; }

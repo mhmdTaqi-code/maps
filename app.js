@@ -3,7 +3,7 @@
 'use strict';
 
 // ---------------------------------------------------------------- constants
-const DATA_VERSION = '11';    // bump when files in data/ change (also in sw.js)
+const DATA_VERSION = '13';    // bump when files in data/ change (also in sw.js)
 const SITE_CENTER = [33.3387, 44.3935];
 const SITE_ZOOM = 17;
 const BAGHDAD_VIEWBOX = '44.20,33.45,44.55,33.20';
@@ -116,7 +116,7 @@ const S = {
   planCorners: null,
   calib: { dx: 0, dy: 0, rot: 0, scale: 1 },
   settings: { observer: '', basemap: 'sat', heritageMode: 'status', planOpacity: 0.55,
-    layers: { heritage: true, heritageLabels: true, buildings: true, streets: true, context: true, contours: false, thumbs: true, plan: false, site: true, landmarks: true, survey: true }, hiddenCats: [] },
+    layers: { heritage: true, heritageLabels: true, buildings: true, streets: true, places: true, axes: true, context: true, contours: false, thumbs: true, plan: false, site: true, landmarks: true, survey: true }, hiddenCats: [] },
   selected: null,
   me: null,              // last GPS fix {lat,lng,acc,heading}
   urls: new Map(),       // photo id -> object URL cache
@@ -226,7 +226,7 @@ const isHeritageId = id => /^H/.test(id);
 function lazyLabel(layer, text, opts, minZ) { layer._lz = { text, opts: { permanent: true, interactive: false, ...opts }, minZ }; }
 function syncLabels() {
   const z = map.getZoom();
-  for (const g of [L_.heritage, L_.buildings, L_.streets, L_.landmarks, L_.survey]) g.eachLayer(l => {
+  for (const g of [L_.heritage, L_.buildings, L_.streets, L_.landmarks, L_.survey, L_.places, L_.axes]) if (g) g.eachLayer(l => {
     const s = l._lz;
     if (!s) { return; }
     const want = z >= s.minZ;
@@ -342,7 +342,8 @@ function setBuildingLabel(lyr, id) {
   const rec = S.heritage.get(id);
   if (lyr.getTooltip()) lyr.unbindTooltip();
   lyr._lz = null;
-  if (rec && rec.name) lazyLabel(lyr, esc(rec.name), { direction: 'center', className: 'lbl lbl-name' }, 17);
+  const nm = rec?.name || S.geoIndex?.get(id)?.properties.name;
+  if (nm) lazyLabel(lyr, esc(nm), { direction: 'center', className: 'lbl lbl-name' }, 17);
   else if (isHeritageId(id) && S.settings.layers.heritageLabels) lazyLabel(lyr, id, { direction: 'center', className: 'lbl lbl-id' }, 19);
 }
 // cheap refresh after editing one building (no full rebuild of 1000 layers)
@@ -439,16 +440,17 @@ function applyLayerVisibility() {
   const ly = S.settings.layers;
   const tog = (lyr, on) => { if (!lyr) return; if (on && !map.hasLayer(lyr)) map.addLayer(lyr); if (!on && map.hasLayer(lyr)) map.removeLayer(lyr); };
   tog(L_.buildings, ly.buildings); tog(L_.heritage, ly.heritage); tog(L_.plan, ly.plan); tog(L_.site, ly.site);
-  tog(L_.streets, ly.streets); tog(L_.context, ly.context); tog(L_.contours, ly.contours); tog(L_.landmarks, ly.landmarks); tog(L_.survey, ly.survey); tog(L_.thumbs, ly.thumbs);
+  tog(L_.streets, ly.streets); tog(L_.places, ly.places && !!S.places); tog(L_.axes, ly.axes); tog(L_.context, ly.context); tog(L_.contours, ly.contours); tog(L_.landmarks, ly.landmarks); tog(L_.survey, ly.survey); tog(L_.thumbs, ly.thumbs);
   updateLabelVisibility();
 }
 
 async function loadStatic() {
   const get = u => fetch(`${u}?v=${DATA_VERSION}`).then(r => { if (!r.ok) throw new Error(u); return r.json(); });
-  const [her, bld, corners, site, lm, st, cadB, cadC] = await Promise.all([
-    get('data/heritage.json'), get('data/buildings.json'), get('data/plan_corners.json'), get('data/site.json'), get('data/landmarks.json'), get('data/streets.json').catch(() => null), get('data/context_buildings.json').catch(() => null), get('data/cad_contours.json').catch(() => null),
+  const [her, bld, corners, site, lm, st, cadB, cadC, pl] = await Promise.all([
+    get('data/heritage.json'), get('data/buildings.json'), get('data/plan_corners.json'), get('data/site.json'), get('data/landmarks.json'), get('data/streets.json').catch(() => null), get('data/context_buildings.json').catch(() => null), get('data/cad_contours.json').catch(() => null), get('data/places.json').catch(() => null),
   ]);
-  S.heritageGeo = her; S.buildingsGeo = bld; S.planCorners = corners; S.streetsGeo = st;
+  S.heritageGeo = her; S.buildingsGeo = bld; S.planCorners = corners; S.streetsGeo = st; S.siteGeo = site;
+  if (pl) { S.places = pl.places; S.links = { axes: pl.axes, triangle: pl.triangle }; }
   // surrounding city from the CAD (CADMapper/OSM) export, coloured by height
   if (cadB) L.geoJSON(cadB, {
     style: f => ({ renderer: ctxRenderer, color: '#3b2a1e', weight: .6, fillColor: floorColor(f.properties.floors) || '#ccc', fillOpacity: .55 }),
@@ -461,7 +463,7 @@ async function loadStatic() {
   st?.features.forEach((f, i) => (f.properties.sid = 'S' + String(i + 1).padStart(3, '0')));
   S.geoIndex = new Map([...her.features, ...bld.features].map(f => [f.properties.id, f]));
   L.geoJSON(site, { style: { color: '#ffd166', weight: 2, dashArray: '8 6', fill: false, interactive: false } }).addTo(L_.site);
-  L.geoJSON(lm, {
+  if (!S.places) L.geoJSON(lm, {
     pointToLayer: (f, ll) => L.marker(ll, { pane: 'surveyPane', icon: L.divIcon({ className: '', html: '<div class="lm"></div>', iconSize: [10, 10], iconAnchor: [5, 5] }) }),
     onEachFeature: (f, l) => {
       lazyLabel(l, esc(f.properties.name), { direction: 'top', offset: [0, -6], className: 'lbl lbl-lm' }, 18);
@@ -652,6 +654,8 @@ const PANELS = {
       ${swHtml('survey', 'رصدنا الميداني', `${S.features.size} عنصر`, ly.survey, 'background:#e67e22')}
       ${swHtml('landmarks', 'معالم معروفة', 'من OpenStreetMap', ly.landmarks, 'background:#fff;border:3px solid #1d5f8a')}
       ${swHtml('buildings', 'كل المباني', `${S.buildingsGeo?.features.length || 0} مبنى بحدوده من المخطط — دوس على أي مبنى لتوثيقه`, ly.buildings, 'background:rgba(255,255,255,.25);border:1.5px solid #fff')}
+      ${swHtml('places', 'أماكن للربط', `${S.places?.length || 0} مكان معروف حول السايت مع وصف ومسافة مشي`, ly.places, 'background:#8e44ad;border-radius:50%')}
+      ${swHtml('axes', 'محاور الربط ومثلث المتنبي', 'مقترحات ربط السايت بالمحيط', ly.axes, 'border-top:3px dotted #7b2cbf')}
       ${swHtml('context', 'مباني المحيط (CAD)', 'مباني بغداد حول السايت ملوّنة حسب الارتفاع', ly.context, 'background:linear-gradient(90deg,#fde7d1,#ef8250,#7a1f14)')}
       ${swHtml('contours', 'خطوط الكنتور', 'المناسيب من ملف الكاد', ly.contours, 'border-top:2px dashed #a0522d')}
       ${swHtml('streets', 'الشوارع والدرابين', 'شبكة المسارات: شارع / درب / زقاق ضيّق', ly.streets, 'background:linear-gradient(90deg,#ffd166 33%,#ff9f43 33% 66%,#ff6b6b 66%)')}
@@ -696,6 +700,8 @@ const PANELS = {
   analysis() { openSheet('تحليل السايت', analysisHtml(), body => {
     body.addEventListener('click', e => {
       const go = e.target.closest('[data-goh]'); if (go) { flyToBuilding(go.dataset.goh); closeSheet(); }
+      const pl = e.target.closest('[data-pl]'); if (pl) { const x = S.places.find(q => q.name === pl.dataset.pl); map.flyTo([x.lat, x.lon], 18); openPlace(x.name); }
+      if (e.target.closest('[data-tri]')) { map.flyToBounds(L.latLngBounds(S.links.triangle.coords), { padding: [40, 40] }); openTriangle(); }
     });
   }); },
 
@@ -955,7 +961,21 @@ function editShape(id) {
 }
 
 // ---------------------------------------------------------------- building records (heritage + every other footprint)
-const buildingTitle = (id, rec) => rec?.name || (isHeritageId(id) ? `مبنى حفاظ ${id}` : `مبنى ${id}`);
+const buildingTitle = (id, rec) => rec?.name || S.geoIndex?.get(id)?.properties.name || (isHeritageId(id) ? `مبنى حفاظ ${id}` : `مبنى ${id}`);
+const OSM_KIND_AR = { school: 'مدرسة', place_of_worship: 'دار عبادة', archaeological_site: 'موقع أثري', bank: 'مصرف', exhibition_centre: 'معارض / غرفة تجارة',
+  memorial: 'معلم تذكاري', sports: 'رياضي', building: 'مبنى', yes: 'مبنى', library: 'مكتبة', cafe: 'مقهى', restaurant: 'مطعم', marketplace: 'سوق' };
+// rows of the always-known (computed) details every building has
+function baseRows(bp) {
+  return [
+    bp.name && ['معروف باسم', esc(bp.name)],
+    bp.osm_kind && OSM_KIND_AR[bp.osm_kind] && bp.osm_kind !== 'yes' && ['الصنف (OSM)', OSM_KIND_AR[bp.osm_kind]],
+    (bp.street || bp.street_kind) && ['يطل على', `${esc(bp.street || bp.street_kind)}${bp.street_w ? ` · عرض ≈ ${bp.street_w} م` : ''}`],
+    bp.near && ['أقرب معلم', `${esc(bp.near)} · ${bp.near_d} م`],
+    ['المساحة / المحيط', `${fmtArea(bp.area_m2)} · ${bp.perim_m ?? '—'} م`],
+    bp.courtyard && ['الحوش', 'بيه حوش داخلي'],
+    bp.block && ['البلوك', `رقم ${bp.block}`],
+  ];
+}
 async function addPhotosTo(id, capture) {
   const files = await pickPhotos(capture); if (!files.length) return false;
   toast('جاري حفظ الصور…');
@@ -974,6 +994,8 @@ function ensureVisible(latlng) {
   if (innerWidth < 900) { if (p.y > r.top - 50) map.panBy([0, p.y - r.top / 2], { animate: true }); }
   else if (p.x < r.right + 30) map.panBy([p.x - (r.right + innerWidth) / 2, 0], { animate: true });
 }
+// the knowledge-base place whose name matches this building (names can be joined with " / ")
+const placeOf = base => { const n = base.properties.name; return n && (S.places || []).find(p => n.split(' / ').includes(p.name)); };
 function openBuilding(id) {
   const base = S.geoIndex.get(id); if (!base) return;
   const rec = S.heritage.get(id) || { id, photos: [] };
@@ -986,7 +1008,7 @@ function openBuilding(id) {
     rec.floors && ['الطوابق', esc(rec.floors)], rec.era && ['الحقبة', esc(rec.era)],
     rec.use && ['الاستعمال الحالي', esc(rec.use)], rec.use_orig && ['الاستعمال الأصلي', esc(rec.use_orig)],
     rec.materials?.length && ['المواد', esc(rec.materials.join('، '))], rec.elements?.length && ['عناصر', esc(rec.elements.join('، '))],
-    ['المساحة', `${fmtArea(base.properties.area_m2)} (بصمة)`],
+    ...baseRows(base.properties),
     !rec.floors && base.properties.floors && ['الارتفاع (مسح CAD)', `${base.properties.height_m} م ≈ ${base.properties.floors} طابق`],
     S.me && ['يبعد عني', fmtLen(distTo(c))],
     rec.visitedAt && ['وثّقه', `${esc(rec.visitedBy || '—')} · ${fmtDate(rec.visitedAt)}`],
@@ -999,6 +1021,7 @@ function openBuilding(id) {
       <button class="btn" id="bGal">🖼 من المعرض</button>
     </div>
     <h3>${her ? 'مبنى حفاظ — ' : ''}<span dir="ltr">${id}</span></h3>
+    ${placeOf(base) ? `<button class="btn block" id="bPlace" style="margin-bottom:10px">📖 تاريخ المكان وعلاقته بالسايت</button>` : ''}
     <dl class="kv">${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>
     ${rec.notes ? `<h3>ملاحظات</h3><p style="white-space:pre-wrap;margin:0;font-size:14px;line-height:1.7">${esc(rec.notes)}</p>` : ''}
     <div class="row" style="margin-top:14px">
@@ -1009,6 +1032,7 @@ function openBuilding(id) {
     $('#bCam', body).onclick = async () => { if (await addPhotosTo(id, true)) openBuilding(id); };
     $('#bGal', body).onclick = async () => { if (await addPhotosTo(id, false)) openBuilding(id); };
     $('#bEdit', body).onclick = () => editBuilding(id);
+    const bp = $('#bPlace', body); if (bp) bp.onclick = () => openPlace(placeOf(base).name);
     return () => select(null);
   });
   ensureVisible(labelPoint(f));
@@ -1063,6 +1087,129 @@ function openLandmark(f) {
   body => { $('#adopt', body).onclick = () => { editFeature({ type: 'Point', coordinates: [lng, lat] }, 'point', null); const n = $('#sheetBody [name="name"]'); if (n) n.value = f.properties.name; }; });
 }
 
+
+// ---------------------------------------------------------------- places to connect with + connection axes / triangle
+const PLACE_CATS = {
+  religious: ['ديني', '#0e7c66'], market: ['سوق', '#c27c0e'], khan: ['خان', '#b8860b'], heritage_house: ['بيت تراثي', '#9c3d16'],
+  education: ['تعليمي', '#2e86ab'], cultural: ['ثقافي', '#8e44ad'], government: ['حكومي', '#6b5b95'], cafe: ['مقهى', '#d6336c'],
+  street: ['شارع / سوق', '#e67e22'], palace: ['قصر', '#a0522d'], bath: ['حمّام', '#1f9bd1'], bridge: ['جسر', '#555555'], other: ['أخرى', '#7f8c8d'],
+};
+const placeCat = c => PLACE_CATS[c] || PLACE_CATS.other;
+const walkTxt = m => m < 1 ? 'أقل من دقيقة' : `${Math.round(m)} دقيقة مشي`;
+L_.places = L.featureGroup(); L_.axes = L.featureGroup();
+map.createPane('axesPane').style.zIndex = 415;
+
+function renderPlaces() {
+  L_.places.clearLayers();
+  for (const p of S.places || []) {
+    const [, color] = placeCat(p.category);
+    const sz = p.analysis_value === 'high' ? 16 : p.analysis_value === 'medium' ? 12 : 9;
+    const m = L.marker([p.lat, p.lon], { pane: 'surveyPane', icon: L.divIcon({ className: '', html: `<div class="place-pin" style="width:${sz}px;height:${sz}px;background:${color}"></div>`, iconSize: [sz, sz], iconAnchor: [sz / 2, sz / 2] }) });
+    lazyLabel(m, esc(p.name), { direction: 'top', offset: [0, -sz / 2 - 2], className: 'lbl lbl-lm' }, p.analysis_value === 'high' ? 16 : 18);
+    m.on('click', () => openPlace(p.name));
+    L_.places.addLayer(m);
+  }
+  syncLabels();
+}
+
+function renderAxes() {
+  L_.axes.clearLayers();
+  const ar = L.svg({ pane: 'axesPane' });
+  const t = S.links?.triangle;
+  if (t?.coords?.length === 3) {
+    const tri = L.polygon(t.coords, { renderer: ar, color: '#b03ad8', weight: 2.5, dashArray: '10 7', fillColor: '#b03ad8', fillOpacity: .08 });
+    tri.on('click', e => { L.DomEvent.stopPropagation(e); openTriangle(); });
+    lazyLabel(tri, 'مثلث الربط — المتنبي', { direction: 'center', className: 'lbl lbl-axis' }, 15);
+    L_.axes.addLayer(tri);
+  }
+  for (const [i, a] of (S.links?.axes || []).entries()) {
+    if (!a.coords || a.coords.length < 2) continue;
+    const l = L.polyline(a.coords, { renderer: ar, color: '#7b2cbf', weight: 4, opacity: .85, dashArray: '2 8', lineCap: 'round' });
+    l.on('click', e => { L.DomEvent.stopPropagation(e); openAxis(i); });
+    lazyLabel(l, esc(a.name_ar), { direction: 'center', className: 'lbl lbl-axis' }, 17);
+    L_.axes.addLayer(l);
+  }
+  syncLabels();
+}
+
+function openPlace(name) {
+  const p = (S.places || []).find(x => x.name === name); if (!p) return;
+  const [label, color] = placeCat(p.category);
+  openSheet(p.name, `
+    <div class="row" style="gap:6px;margin-bottom:8px">
+      <span class="badge"><span class="dot" style="background:${color}"></span>${label}</span>
+      ${p.era ? `<span class="badge">${esc(p.era)}</span>` : ''}${p.built ? `<span class="badge">${esc(p.built)}</span>` : ''}
+      ${p.analysis_value === 'high' ? '<span class="badge" style="background:#f3e2d8">قيمة تحليلية عالية</span>' : ''}
+    </div>
+    ${p.name_en ? `<p class="muted" style="margin:0 0 6px" dir="ltr">${esc(p.name_en)}</p>` : ''}
+    <p style="margin:0;line-height:1.8;font-size:14.5px">${esc(p.summary_ar || '')}</p>
+    ${p.site_relevance_ar ? `<h3>علاقته بالسايت</h3><p style="margin:0;line-height:1.8;font-size:14px">${esc(p.site_relevance_ar)}</p>` : ''}
+    <div class="kpis" style="margin-top:12px">
+      <div class="kpi"><b>${p.inside ? 'داخل' : fmtLen(p.dist_m)}</b><span>${p.inside ? 'السايت' : 'من حدود السايت'}</span></div>
+      <div class="kpi"><b>${p.inside ? '—' : Math.round(p.walk_min)}</b><span>دقيقة مشي تقريباً</span></div>
+      <div class="kpi"><b>${S.me ? fmtLen(distTo([p.lat, p.lon])) : '—'}</b><span>يبعد عني</span></div>
+    </div>
+    ${p.confidence === 'low' ? '<p class="muted" style="color:var(--warn)">⚠ المعلومات التاريخية لهذا المكان غير مؤكدة — تحقّقوا منها.</p>' : ''}
+    ${(p.sources || []).filter(u => /^https:\/\//.test(u)).length ? `<p class="muted" style="margin:10px 0 0">مصادر: ${p.sources.filter(u => /^https:\/\//.test(u)).map(u => `<a href="${esc(u)}" target="_blank" rel="noopener" dir="ltr">${esc(new URL(u).hostname)}</a>`).join(' · ')}</p>` : ''}
+    <div class="row" style="margin-top:14px">
+      ${p.inside ? '' : '<button class="btn primary" id="pAxis">ارسم محور ربط مع السايت</button>'}
+      <a class="btn" href="https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lon}&travelmode=walking" target="_blank" rel="noopener">اتجاهات</a>
+    </div>
+    <div class="row" style="margin-top:8px"><button class="btn" id="pAdopt">سجّله برصدنا (صور وملاحظات)</button></div>
+    <p class="muted" style="margin-top:12px">الوصف من قاعدة معرفة مولّدة بالذكاء الاصطناعي (gpt-6-astra) ومربوطة بمواقع OpenStreetMap — راجعوها قبل الاعتماد عليها بالتقرير.</p>`, body => {
+    const ax = $('#pAxis', body);
+    if (ax) ax.onclick = () => { drawLinkToSite(p); closeSheet(); };
+    $('#pAdopt', body).onclick = () => { editFeature({ type: 'Point', coordinates: [p.lon, p.lat] }, 'point', null); const n = $('#sheetBody [name="name"]'); if (n) n.value = p.name; };
+  });
+}
+
+// straight link from the nearest point of the site edge to a place, with length and walking time
+function drawLinkToSite(p) {
+  const site = S.siteGeo; if (!site) return;
+  const line = turf.polygonToLine(site);
+  const near = turf.nearestPointOnLine(line, turf.point([p.lon, p.lat]));
+  const a = [near.geometry.coordinates[1], near.geometry.coordinates[0]], b = [p.lat, p.lon];
+  const d = map.distance(a, b);
+  const l = L.polyline([a, b], { color: '#7b2cbf', weight: 4, dashArray: '2 8', lineCap: 'round' }).addTo(L_.measure);
+  l.bindTooltip(`${esc(p.name)} · ${fmtLen(d)} · ≈ ${Math.round(d * 1.25 / 75)} دقيقة`, { permanent: true, direction: 'center', className: 'lbl lbl-axis' }).openTooltip();
+  map.flyToBounds(L.latLngBounds([a, b]), { padding: [60, 60], maxZoom: 18 });
+  toast('المحور مرسوم مؤقتاً — امسحه من زر القياس «مسح القياسات»', 4000);
+}
+
+function openAxis(i) {
+  const a = S.links.axes[i];
+  openSheet(a.name_ar, `
+    <div class="row" style="gap:6px;margin-bottom:8px"><span class="badge"><span class="dot" style="background:#7b2cbf"></span>محور ${esc(a.type || '')}</span></div>
+    <dl class="kv"><dt>من</dt><dd>${esc(a.from)}</dd><dt>إلى</dt><dd>${esc(a.to)}</dd>
+    ${(a.via || []).length ? `<dt>مروراً بـ</dt><dd>${esc(a.via.join('، '))}</dd>` : ''}
+    <dt>الطول (مستقيم)</dt><dd>${fmtLen(a.length_m)}</dd><dt>المشي</dt><dd>${walkTxt(a.walk_min)}</dd></dl>
+    <h3>الفكرة</h3><p style="margin:0;line-height:1.8">${esc(a.rationale_ar || '')}</p>
+    <p class="muted" style="margin-top:12px">مقترح من gpt-6-astra — للنقاش والتطوير، مو قرار تصميمي نهائي.</p>`);
+}
+function openTriangle() {
+  const t = S.links.triangle;
+  openSheet('مثلث الربط', `
+    <p class="muted" style="margin-top:0">فكرة الدكتورة: ربط السايت مع شارع المتنبي ومحيطه.</p>
+    <dl class="kv">${t.vertices.map((v, i) => `<dt>الرأس ${i + 1}</dt><dd>${esc(v)}</dd>`).join('')}
+    <dt>محيط المثلث</dt><dd>${fmtLen(t.perimeter_m)}</dd><dt>مساحته</dt><dd>${fmtArea(t.area_m2)}</dd></dl>
+    <h3>المفهوم</h3><p style="margin:0;line-height:1.8">${esc(t.concept_ar || '')}</p>
+    <h3>أماكن داخل المثلث وحوله</h3><div id="triList"></div>`, body => {
+    const poly = turf.polygon([[...t.coords.map(([la, lo]) => [lo, la]), [t.coords[0][1], t.coords[0][0]]]]);
+    const inside = (S.places || []).filter(p => turf.booleanPointInPolygon(turf.point([p.lon, p.lat]), turf.buffer(poly, 0.06, { units: 'kilometers' })));
+    $('#triList', body).innerHTML = inside.map(p => `<div class="list-item" data-pl="${esc(p.name)}"><div class="thumb" style="background:${placeCat(p.category)[1]}33"></div><div class="meta"><b>${esc(p.name)}</b><small>${placeCat(p.category)[0]}${p.era ? ' · ' + esc(p.era) : ''}</small></div></div>`).join('') || '<p class="muted">—</p>';
+    $('#triList', body).onclick = e => { const n = e.target.closest('[data-pl]')?.dataset.pl; if (n) openPlace(n); };
+  });
+}
+
+function linksHtml() {
+  const out = (S.places || []).filter(p => !p.inside && p.analysis_value !== 'low').sort((a, b) => a.walk_min - b.walk_min).slice(0, 12);
+  if (!out.length) return '';
+  return `<h3>أماكن للربط مع السايت (الأقرب مشياً)</h3>
+    ${S.links?.triangle ? `<button class="btn block" data-tri="1" style="margin-bottom:8px">مثلث الربط مع المتنبي — اقرأ الفكرة</button>` : ''}
+    ${out.map(p => `<div class="list-item" data-pl="${esc(p.name)}"><div class="thumb" style="background:${placeCat(p.category)[1]}33"><span class="dot" style="width:12px;height:12px;border-radius:50%;background:${placeCat(p.category)[1]}"></span></div>
+      <div class="meta"><b>${esc(p.name)}</b><small>${placeCat(p.category)[0]}${p.era ? ' · ' + esc(p.era) : ''}</small></div><span class="dist">${Math.round(p.walk_min)} د</span></div>`).join('')}`;
+}
+
 // ---------------------------------------------------------------- analysis
 function analysisHtml() {
   const H = S.heritageGeo.features, total = H.length;
@@ -1107,6 +1254,7 @@ function analysisHtml() {
     <div class="progress"><i style="width:${pct}%"></i></div>
     <p class="muted">${court} مبنى بيه حوش وسطي · مساحة السايت ≈ ${fmtArea(siteArea)} · ${S.buildingsGeo.features.length} مبنى آخر بالسايت، وثّقتوا منها ${otherDoc}</p>
     ${nearest}
+    ${linksHtml()}
     <h3>الحالة الإنشائية (المقيّمة)</h3>
     ${Object.values(condCount).some(Boolean) ? `<div class="bars">${CONDITIONS.map(c => `<div class="bar"><span>${c[1]}</span><span class="t"><i style="width:${condCount[c[0]] / condMax * 100}%;background:${c[2]}"></i></span><span class="v">${condCount[c[0]]}</span></div>`).join('')}</div>` : '<p class="muted">بعد ما قيّمتوا حالة أي مبنى.</p>'}
     <h3>الرصد الميداني</h3>
@@ -1499,6 +1647,13 @@ async function doSearch(q, remote) {
     const f = l.feature; if (f && (f.properties.name.includes(q) || (f.properties.name_en || '').toLowerCase().includes(q.toLowerCase())))
       local.push({ label: f.properties.name, sub: 'معلم', go: () => { map.flyTo(l.getLatLng(), 19); openLandmark(f); } });
   }) : null));
+  for (const [id, f] of S.geoIndex || []) {
+    const n = f.properties.name;
+    if (n && n.includes(q) && !local.some(x => x.label === n)) local.unshift({ label: n, sub: isHeritageId(id) ? `مبنى حفاظ ${id}` : `مبنى ${id}`, go: () => { flyToBuilding(id); openBuilding(id); } });
+  }
+  for (const pl of S.places || []) {
+    if (pl.name.includes(q) && !local.some(x => x.label === pl.name)) local.push({ label: pl.name, sub: 'مكان للربط', go: () => { map.flyTo([pl.lat, pl.lon], 18); openPlace(pl.name); } });
+  }
   const hm = q.match(/^([hb])?\s*(\d{1,4})$/i);
   if (hm) {
     const pre = (hm[1] || 'h').toUpperCase(), id = pre + hm[2].padStart(pre === 'H' ? 3 : 4, '0');
@@ -1531,7 +1686,7 @@ $('#btnSite').onclick = () => map.flyTo(SITE_CENTER, SITE_ZOOM);
   applyTheme();
   setBasemap(S.settings.basemap in BASEMAPS ? S.settings.basemap : 'sat');
   try { await loadStatic(); } catch (e) { console.error(e); toast('تعذّر تحميل طبقات السايت'); }
-  renderHeritage(); renderStreets(); renderPlan(); renderSurvey(); applyLayerVisibility();
+  renderHeritage(); renderStreets(); renderPlaces(); renderAxes(); renderPlan(); renderSurvey(); applyLayerVisibility();
   if (navigator.storage?.persist) navigator.storage.persist().catch(() => {});
   if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) navigator.serviceWorker.register('sw.js').catch(() => {});
   if (!S.settings.observer) setTimeout(() => toast('من «المزيد» اكتب اسمك حتى يبين على رصدك', 4000), 1200);
