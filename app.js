@@ -115,7 +115,7 @@ const S = {
   planCorners: null,
   calib: { dx: 0, dy: 0, rot: 0, scale: 1 },
   settings: { observer: '', basemap: 'sat', heritageMode: 'status', planOpacity: 0.55,
-    layers: { heritage: true, heritageLabels: true, buildings: true, streets: true, thumbs: true, plan: false, site: true, landmarks: true, survey: true }, hiddenCats: [] },
+    layers: { heritage: true, heritageLabels: true, buildings: true, streets: true, context: true, contours: false, thumbs: true, plan: false, site: true, landmarks: true, survey: true }, hiddenCats: [] },
   selected: null,
   me: null,              // last GPS fix {lat,lng,acc,heading}
   urls: new Map(),       // photo id -> object URL cache
@@ -204,9 +204,12 @@ const L_ = {
   survey: L.featureGroup(),
   thumbs: L.featureGroup(),
   streets: L.featureGroup(),
+  context: L.featureGroup(),
+  contours: L.featureGroup(),
   me: L.layerGroup().addTo(map),
   measure: L.layerGroup().addTo(map),
 };
+map.createPane('contextPane').style.zIndex = 401;
 map.createPane('streetsPane').style.zIndex = 402;
 map.createPane('buildingsPane').style.zIndex = 405;
 map.createPane('thumbPane').style.zIndex = 640;
@@ -216,6 +219,10 @@ const hRenderer = L.svg({ pane: 'heritagePane' });
 const isHeritageId = id => /^H/.test(id);
 const isDocumented = r => !!(r && (r.visited || r.name || (r.photos || []).length || r.condition));
 
+// building height (floors): field record wins, else CAD/OSM survey value
+const FLOOR_RAMP = [[1, '#fde7d1'], [2, '#fbc9a0'], [3, '#f7a571'], [4, '#ef8250'], [6, '#d95b37'], [9, '#b13a26'], [99, '#7a1f14']];
+const floorColor = f => f ? FLOOR_RAMP.find(([k]) => f <= k)[1] : null;
+const floorsOf = id => +(S.heritage.get(id)?.floors) || S.geoIndex?.get(id)?.properties.floors || null;
 function heritageStyle(hid) {
   const rec = S.heritage.get(hid);
   const mode = S.settings.heritageMode;
@@ -225,6 +232,8 @@ function heritageStyle(hid) {
   } else if (mode === 'condition') {
     const c = rec && condOf(rec.condition);
     fill = c ? c[2] : '#a99c8e'; stroke = '#2a1d12';
+  } else if (mode === 'height') {
+    fill = floorColor(floorsOf(hid)) || '#a99c8e'; stroke = '#2a0f04';
   }
   if (hid === S.selected) { stroke = '#ffd166'; w = 4; }
   return { renderer: hRenderer, color: stroke, weight: w, fillColor: fill, fillOpacity: .72, opacity: .95 };
@@ -232,6 +241,10 @@ function heritageStyle(hid) {
 function buildingStyle(id) {
   const rec = S.heritage.get(id);
   if (id === S.selected) return { renderer: bRenderer, color: '#ffd166', weight: 3.5, fillColor: '#ffd166', fillOpacity: .25 };
+  if (S.settings.heritageMode === 'height') {
+    const fc = floorColor(floorsOf(id));
+    return { renderer: bRenderer, color: '#ffffff', weight: 1, fillColor: fc || '#ffffff', fillOpacity: fc ? .8 : .1 };
+  }
   if (isDocumented(rec)) {
     const c = S.settings.heritageMode === 'condition' && condOf(rec.condition);
     return { renderer: bRenderer, color: '#bfe3ff', weight: 1.4, fillColor: c ? c[2] : '#2e86ab', fillOpacity: .55 };
@@ -395,16 +408,25 @@ function applyLayerVisibility() {
   const ly = S.settings.layers;
   const tog = (lyr, on) => { if (!lyr) return; if (on && !map.hasLayer(lyr)) map.addLayer(lyr); if (!on && map.hasLayer(lyr)) map.removeLayer(lyr); };
   tog(L_.buildings, ly.buildings); tog(L_.heritage, ly.heritage); tog(L_.plan, ly.plan); tog(L_.site, ly.site);
-  tog(L_.streets, ly.streets); tog(L_.landmarks, ly.landmarks); tog(L_.survey, ly.survey); tog(L_.thumbs, ly.thumbs);
+  tog(L_.streets, ly.streets); tog(L_.context, ly.context); tog(L_.contours, ly.contours); tog(L_.landmarks, ly.landmarks); tog(L_.survey, ly.survey); tog(L_.thumbs, ly.thumbs);
   updateLabelVisibility();
 }
 
 async function loadStatic() {
   const get = u => fetch(u, { cache: 'no-cache' }).then(r => { if (!r.ok) throw new Error(u); return r.json(); });
-  const [her, bld, corners, site, lm, st] = await Promise.all([
-    get('data/heritage.geojson'), get('data/buildings.geojson'), get('data/plan_corners.json'), get('data/site.geojson'), get('data/landmarks.geojson'), get('data/streets.geojson').catch(() => null),
+  const [her, bld, corners, site, lm, st, cadB, cadC] = await Promise.all([
+    get('data/heritage.geojson'), get('data/buildings.geojson'), get('data/plan_corners.json'), get('data/site.geojson'), get('data/landmarks.geojson'), get('data/streets.geojson').catch(() => null), get('data/context_buildings.geojson').catch(() => null), get('data/cad_contours.geojson').catch(() => null),
   ]);
   S.heritageGeo = her; S.buildingsGeo = bld; S.planCorners = corners; S.streetsGeo = st;
+  // surrounding city from the CAD (CADMapper/OSM) export, coloured by height
+  if (cadB) L.geoJSON(cadB, {
+    style: f => ({ renderer: L.canvas({ pane: 'contextPane' }), color: '#3b2a1e', weight: .6, fillColor: floorColor(f.properties.floors) || '#ccc', fillOpacity: .55 }),
+    onEachFeature: (f, l) => l.bindTooltip(f.properties.floors ? `${f.properties.floors} طابق · ${f.properties.height_m} م` : 'ارتفاع غير معروف', { sticky: true, className: 'lbl' }),
+  }).addTo(L_.context);
+  if (cadC) L.geoJSON(cadC, {
+    style: { color: '#a0522d', weight: 1, opacity: .7, dashArray: '3 4' },
+    onEachFeature: (f, l) => l.bindTooltip(`منسوب ${f.properties.elev_m} م`, { sticky: true, className: 'lbl' }),
+  }).addTo(L_.contours);
   st?.features.forEach((f, i) => (f.properties.sid = 'S' + String(i + 1).padStart(3, '0')));
   S.geoIndex = new Map([...her.features, ...bld.features].map(f => [f.properties.id, f]));
   L.geoJSON(site, { style: { color: '#ffd166', weight: 2, dashArray: '8 6', fill: false, interactive: false } }).addTo(L_.site);
@@ -599,11 +621,13 @@ const PANELS = {
       ${swHtml('survey', 'رصدنا الميداني', `${S.features.size} عنصر`, ly.survey, 'background:#e67e22')}
       ${swHtml('landmarks', 'معالم معروفة', 'من OpenStreetMap', ly.landmarks, 'background:#fff;border:3px solid #1d5f8a')}
       ${swHtml('buildings', 'كل المباني', `${S.buildingsGeo?.features.length || 0} مبنى بحدوده من المخطط — دوس على أي مبنى لتوثيقه`, ly.buildings, 'background:rgba(255,255,255,.25);border:1.5px solid #fff')}
+      ${swHtml('context', 'مباني المحيط (CAD)', 'مباني بغداد حول السايت ملوّنة حسب الارتفاع', ly.context, 'background:linear-gradient(90deg,#fde7d1,#ef8250,#7a1f14)')}
+      ${swHtml('contours', 'خطوط الكنتور', 'المناسيب من ملف الكاد', ly.contours, 'border-top:2px dashed #a0522d')}
       ${swHtml('streets', 'الشوارع والدرابين', 'شبكة المسارات: شارع / درب / زقاق ضيّق', ly.streets, 'background:linear-gradient(90deg,#ffd166 33%,#ff9f43 33% 66%,#ff6b6b 66%)')}
       ${swHtml('thumbs', 'صور المباني على الخريطة', 'تظهر صورة مصغّرة فوق كل مبنى مصوّر', ly.thumbs, 'background:#ccc;border-radius:50%')}
       ${swHtml('site', 'حدود السايت', '', ly.site, 'border:2px dashed #ffd166')}
       <h3>تلوين مباني الحفاظ</h3>
-      ${chipsHtml('hmode', [['status', 'موثّق / غير موثّق'], ['condition', 'حسب الحالة الإنشائية'], ['plain', 'لون واحد']], S.settings.heritageMode)}
+      ${chipsHtml('hmode', [['status', 'موثّق / غير موثّق'], ['condition', 'حسب الحالة الإنشائية'], ['height', 'حسب الارتفاع (طوابق)'], ['plain', 'لون واحد']], S.settings.heritageMode)}
       <div class="legend" id="hLegend"></div>
       <h3>إظهار فئات الرصد</h3>
       ${['point', 'line', 'polygon'].map(k => chipsHtml('cats-' + k, CATS[k].map(c => [k + ':' + c[0], c[1], c[2]]), CATS[k].map(c => k + ':' + c[0]).filter(x => !S.settings.hiddenCats.includes(x)), true)).join('<div style="height:6px"></div>')}
@@ -613,7 +637,8 @@ const PANELS = {
         const m = S.settings.heritageMode;
         $('#hLegend', body).innerHTML = m === 'status'
           ? `<span><i class="swatch" style="background:#9c3d16;border:3px solid #3ddc84"></i>موثّق (زرناه)</span><span><i class="swatch" style="background:#9c3d16;border:1px solid #ffe2c8"></i>بعد ما انوثّق</span><span><i class="swatch" style="background:#2e86ab"></i>مبنى عادي موثّق</span>`
-          : m === 'condition' ? CONDITIONS.map(c => `<span><i class="swatch" style="background:${c[2]}"></i>${c[1]}</span>`).join('') + '<span><i class="swatch" style="background:#bbb"></i>غير مقيّم</span>' : '';
+          : m === 'condition' ? CONDITIONS.map(c => `<span><i class="swatch" style="background:${c[2]}"></i>${c[1]}</span>`).join('') + '<span><i class="swatch" style="background:#bbb"></i>غير مقيّم</span>'
+          : m === 'height' ? FLOOR_RAMP.map(([k, c], i) => { const lo = i ? FLOOR_RAMP[i - 1][0] + 1 : 1; return `<span><i class="swatch" style="background:${c}"></i>${k === 99 ? lo + '+' : lo === k ? lo : lo + '–' + k} طابق</span>`; }).join('') + '<span><i class="swatch" style="background:#a99c8e"></i>غير معروف — سجّل عدد الطوابق بالموقع</span>' : '';
       };
       legend();
       body.addEventListener('click', e => {
@@ -931,6 +956,7 @@ function openBuilding(id) {
     rec.use && ['الاستعمال الحالي', esc(rec.use)], rec.use_orig && ['الاستعمال الأصلي', esc(rec.use_orig)],
     rec.materials?.length && ['المواد', esc(rec.materials.join('، '))], rec.elements?.length && ['عناصر', esc(rec.elements.join('، '))],
     ['المساحة', `${fmtArea(base.properties.area_m2)} (بصمة)`],
+    !rec.floors && base.properties.floors && ['الارتفاع (مسح CAD)', `${base.properties.height_m} م ≈ ${base.properties.floors} طابق`],
     S.me && ['يبعد عني', fmtLen(distTo(c))],
     rec.visitedAt && ['وثّقه', `${esc(rec.visitedBy || '—')} · ${fmtDate(rec.visitedAt)}`],
   ].filter(Boolean);
