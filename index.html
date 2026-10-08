@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<title>مسح السايت — الرصافة القديمة</title>
+<meta name="description" content="أداة ميدانية لتحليل الموقع: توثيق المباني والدرابين والمسارات مع GPS وطبقة مباني الحفاظ — بين جسر الأحرار وجسر الشهداء، بغداد.">
+<meta name="theme-color" content="#1c1712">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.17.0/dist/leaflet-geoman.css">
+<link rel="stylesheet" href="app.css?v=5">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark" aria-hidden="true"></span>
+    <div>
+      <h1>مسح السايت</h1>
+      <p>الرصافة القديمة · بين جسر الشهداء وجسر الأحرار</p>
+    </div>
+  </div>
+  <form class="search" id="searchForm" autocomplete="off">
+    <input id="searchInput" type="search" placeholder="ابحث في بغداد أو في السجل…" aria-label="بحث">
+    <div class="search-results" id="searchResults" hidden></div>
+  </form>
+</header>
+
+<main id="map" aria-label="الخريطة"></main>
+
+<div class="crosshair" id="crosshair" hidden aria-hidden="true"><span></span></div>
+
+<div class="fabs">
+  <button class="fab" id="btnSite" title="الرجوع للسايت" aria-label="الرجوع للسايت">
+    <svg viewBox="0 0 24 24"><path d="M4 20V9l8-5 8 5v11h-5v-6H9v6z"/></svg>
+  </button>
+  <button class="fab" id="btnMeasure" title="قياس" aria-label="قياس مسافة أو مساحة">
+    <svg viewBox="0 0 24 24"><path d="M3 17 17 3l4 4L7 21zM7 13l2 2M10 10l2 2M13 7l2 2"/></svg>
+  </button>
+  <button class="fab" id="btnGps" title="موقعي" aria-label="تحديد موقعي GPS">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="8" fill="none"/></svg>
+  </button>
+</div>
+
+<div class="gps-chip" id="gpsChip" hidden></div>
+<div class="track-bar" id="trackBar" hidden>
+  <span class="rec-dot"></span><span id="trackInfo">تسجيل المسار…</span>
+  <button id="trackStop" class="btn small">إيقاف وحفظ</button>
+</div>
+
+<div class="mode-bar" id="modeBar" hidden>
+  <span id="modeText"></span>
+  <div class="mode-actions" id="modeActions"></div>
+</div>
+
+<nav class="dock" aria-label="الأدوات">
+  <button data-panel="add"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span>إضافة</span></button>
+  <button data-panel="layers"><svg viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5z"/><path d="m3 13 9 5 9-5"/></svg><span>الطبقات</span></button>
+  <button data-panel="analysis"><svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><span>التحليل</span></button>
+  <button data-panel="list"><svg viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg><span>السجل</span></button>
+  <button data-panel="more"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg><span>المزيد</span></button>
+</nav>
+
+<section class="sheet" id="sheet" hidden aria-live="polite">
+  <div class="sheet-head">
+    <span class="grip" aria-hidden="true"></span>
+    <h2 id="sheetTitle"></h2>
+    <button class="icon-btn" id="sheetClose" aria-label="إغلاق">✕</button>
+  </div>
+  <div class="sheet-body" id="sheetBody"></div>
+</section>
+
+<div class="lightbox" id="lightbox" hidden><img alt=""><button class="icon-btn" aria-label="إغلاق">✕</button></div>
+<div class="toast" id="toast" role="status" hidden></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.17.0/dist/leaflet-geoman.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@turf/turf@7.1.0/turf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="app.js?v=5"></script>
+</body>
+</html>
