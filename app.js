@@ -115,7 +115,8 @@ const S = {
   planCorners: null,
   calib: { dx: 0, dy: 0, rot: 0, scale: 1 },
   settings: { observer: '', basemap: 'sat', heritageMode: 'status', planOpacity: 0.55,
-    layers: { heritage: true, heritageLabels: true, plan: false, site: true, osm: false, landmarks: true, survey: true }, hiddenCats: [] },
+    layers: { heritage: true, heritageLabels: true, buildings: true, thumbs: true, plan: false, site: true, landmarks: true, survey: true }, hiddenCats: [] },
+  selected: null,
   me: null,              // last GPS fix {lat,lng,acc,heading}
   urls: new Map(),       // photo id -> object URL cache
 };
@@ -194,44 +195,97 @@ const PlanOverlay = L.Layer.extend({
 // ---------------------------------------------------------------- layers
 const L_ = {
   heritage: L.featureGroup(),
+  buildings: L.featureGroup(),
   plan: null,
   site: L.featureGroup(),
-  osm: L.featureGroup(),
   landmarks: L.featureGroup(),
   survey: L.featureGroup(),
+  thumbs: L.featureGroup(),
   me: L.layerGroup().addTo(map),
   measure: L.layerGroup().addTo(map),
 };
+map.createPane('buildingsPane').style.zIndex = 405;
+map.createPane('thumbPane').style.zIndex = 640;
+const bRenderer = L.canvas({ pane: 'buildingsPane', tolerance: 4 });
+const hRenderer = L.svg({ pane: 'heritagePane' });
+
+const isHeritageId = id => /^H/.test(id);
+const isDocumented = r => !!(r && (r.visited || r.name || (r.photos || []).length || r.condition));
 
 function heritageStyle(hid) {
   const rec = S.heritage.get(hid);
   const mode = S.settings.heritageMode;
-  let fill = '#8b3a1a', stroke = '#4a1a06', dash = null, w = 1.2;
+  let fill = '#9c3d16', stroke = '#ffe2c8', w = 1;
   if (mode === 'status') {
-    if (rec && rec.visited) { fill = '#8b3a1a'; stroke = '#2f8a4c'; w = 3; }
-    else { fill = '#8b3a1a'; stroke = '#fff3e6'; dash = '4 3'; w = 1.4; }
+    if (rec && rec.visited) { stroke = '#3ddc84'; w = 2.6; }
   } else if (mode === 'condition') {
     const c = rec && condOf(rec.condition);
-    fill = c ? c[2] : '#bbb'; stroke = '#3b2a1a';
+    fill = c ? c[2] : '#a99c8e'; stroke = '#2a1d12';
   }
-  return { pane: 'heritagePane', color: stroke, weight: w, dashArray: dash, fillColor: fill, fillOpacity: .62, opacity: 1 };
+  if (hid === S.selected) { stroke = '#ffd166'; w = 4; }
+  return { renderer: hRenderer, color: stroke, weight: w, fillColor: fill, fillOpacity: .72, opacity: .95 };
+}
+function buildingStyle(id) {
+  const rec = S.heritage.get(id);
+  if (id === S.selected) return { renderer: bRenderer, color: '#ffd166', weight: 3.5, fillColor: '#ffd166', fillOpacity: .25 };
+  if (isDocumented(rec)) {
+    const c = S.settings.heritageMode === 'condition' && condOf(rec.condition);
+    return { renderer: bRenderer, color: '#bfe3ff', weight: 1.4, fillColor: c ? c[2] : '#2e86ab', fillOpacity: .55 };
+  }
+  return { renderer: bRenderer, color: 'rgba(255,255,255,.75)', weight: .8, fillColor: '#ffffff', fillOpacity: .06 };
 }
 
+const geoLayers = new Map();   // building id -> leaflet layer
 function renderHeritage() {
-  L_.heritage.clearLayers();
+  L_.heritage.clearLayers(); L_.buildings.clearLayers(); geoLayers.clear();
   if (!S.heritageGeo) return;
-  for (const f of S.heritageGeo.features) {
-    const hid = f.properties.id;
-    const lyr = L.geoJSON({ type: 'Feature', properties: f.properties, geometry: calibGeo(f.geometry) }, { style: () => heritageStyle(hid) });
-    lyr.on('click', e => { L.DomEvent.stopPropagation(e); openHeritage(hid); });
-    const rec = S.heritage.get(hid);
-    if (S.settings.layers.heritageLabels) {
-      lyr.bindTooltip(rec && rec.name ? rec.name : hid, { permanent: true, direction: 'center', className: 'lbl hid', interactive: false });
+  const add = (fc, group, styleFn) => {
+    for (const f of fc.features) {
+      const id = f.properties.id;
+      const lyr = L.geoJSON({ type: 'Feature', properties: f.properties, geometry: calibGeo(f.geometry) }, { style: () => styleFn(id) });
+      lyr.on('click', e => { L.DomEvent.stopPropagation(e); openBuilding(id); });
+      const rec = S.heritage.get(id);
+      if (rec && rec.name) lyr.bindTooltip(esc(rec.name), { permanent: true, direction: 'center', className: 'lbl lbl-name', interactive: false });
+      else if (isHeritageId(id) && S.settings.layers.heritageLabels) lyr.bindTooltip(id, { permanent: true, direction: 'center', className: 'lbl lbl-id', interactive: false });
+      geoLayers.set(id, lyr); group.addLayer(lyr);
     }
-    lyr._hid = hid;
-    L_.heritage.addLayer(lyr);
+  };
+  if (S.buildingsGeo) add(S.buildingsGeo, L_.buildings, buildingStyle);
+  add(S.heritageGeo, L_.heritage, heritageStyle);
+  renderThumbs();
+}
+function restyle(id) {
+  const l = geoLayers.get(id); if (!l) return;
+  l.setStyle(isHeritageId(id) ? heritageStyle(id) : buildingStyle(id));
+}
+function select(id) {
+  const prev = S.selected; S.selected = id;
+  if (prev) restyle(prev);
+  if (id) { restyle(id); if (isHeritageId(id)) geoLayers.get(id)?.bringToFront(); }
+}
+
+// round photo thumbnails on the map for every building / shape that has photos
+let thumbRun = 0;
+async function renderThumbs() {
+  const run = ++thumbRun;
+  const items = [];
+  for (const r of S.heritage.values()) {
+    if (!(r.photos || []).length) continue;
+    const f = buildingFeature(r.id); if (!f) continue;
+    items.push({ ll: labelPoint(f), photo: r.photos[0], n: r.photos.length, open: () => openBuilding(r.id) });
   }
-  updateLabelVisibility();
+  for (const f of S.features.values()) {
+    const p = f.properties; if (!(p.photos || []).length || p.kind === 'point') continue;
+    items.push({ ll: labelPoint(f), photo: p.photos[0], n: p.photos.length, open: () => openFeature(p.id) });
+  }
+  const markers = [];
+  for (const it of items) {
+    const url = await photoUrl(it.photo);
+    const m = L.marker(it.ll, { pane: 'thumbPane', icon: L.divIcon({ className: '', html: `<div class="thumb-pin" style="background-image:url(${url})">${it.n > 1 ? `<b>${it.n}</b>` : ''}</div>`, iconSize: [38, 38], iconAnchor: [19, 19] }) });
+    m.on('click', it.open); markers.push(m);
+  }
+  if (run !== thumbRun) return;
+  L_.thumbs.clearLayers(); markers.forEach(m => L_.thumbs.addLayer(m));
 }
 
 function renderPlan() {
@@ -244,21 +298,24 @@ function renderPlan() {
 
 function surveyLayer(f) {
   const p = f.properties, kind = p.kind;
-  const [, label, color] = catOf(kind, p.category);
+  const [, , color] = catOf(kind, p.category);
   let lyr;
   if (kind === 'point') {
     const [lng, lat] = f.geometry.coordinates;
+    const ph = (p.photos || [])[0];
     lyr = L.marker([lat, lng], {
       pane: 'surveyPane',
-      icon: L.divIcon({ className: '', html: `<div class="pin${p.photos && p.photos.length ? ' photo' : ''}" style="background:${color}"></div>`, iconSize: [22, 22], iconAnchor: [11, 11] }),
+      icon: L.divIcon({ className: '', html: ph ? `<div class="thumb-pin pt" data-ph="${ph}" style="border-color:${color}"></div>` : `<div class="pin" style="background:${color}"></div>`,
+        iconSize: ph ? [38, 38] : [22, 22], iconAnchor: ph ? [19, 19] : [11, 11] }),
     });
+    if (ph) lyr.on('add', async () => { const el = lyr.getElement()?.querySelector('[data-ph]'); if (el) el.style.backgroundImage = `url(${await photoUrl(ph)})`; });
   } else {
     const style = kind === 'line'
       ? { pane: 'surveyPane', color, weight: p.category === 'darb' || p.category === 'deadend' ? 5 : 4, opacity: .95, dashArray: p.category === 'axis' ? '10 8' : p.category === 'deadend' ? '2 7' : null, lineCap: 'round' }
       : { pane: 'surveyPane', color, weight: 2, fillColor: color, fillOpacity: .35 };
     lyr = L.geoJSON(f, { style: () => style });
   }
-  if (p.name) lyr.bindTooltip(p.name, { permanent: true, direction: kind === 'point' ? 'top' : 'center', offset: kind === 'point' ? [0, -10] : [0, 0], className: 'lbl' });
+  if (p.name) lyr.bindTooltip(esc(p.name), { permanent: true, direction: kind === 'point' ? 'top' : 'center', offset: kind === 'point' ? [0, -12] : [0, 0], className: 'lbl lbl-name' });
   lyr.on('click', e => { L.DomEvent.stopPropagation(e); openFeature(f.properties.id); });
   lyr._fid = f.properties.id;
   return lyr;
@@ -270,42 +327,36 @@ function renderSurvey() {
     if (hidden.has(f.properties.kind + ':' + f.properties.category)) continue;
     L_.survey.addLayer(surveyLayer(f));
   }
-  updateLabelVisibility();
+  renderThumbs();
 }
 
+// label density by zoom is handled in CSS through classes on the map container
 function updateLabelVisibility() {
-  const z = map.getZoom();
-  const showH = z >= 18, showS = z >= 17;
-  L_.heritage.eachLayer(l => { const t = l.getTooltip && l.getTooltip(); if (t) l[showH ? 'openTooltip' : 'closeTooltip'](); });
-  L_.survey.eachLayer(l => { const t = l.getTooltip && l.getTooltip(); if (t) l[showS ? 'openTooltip' : 'closeTooltip'](); });
-  L_.landmarks.eachLayer(l => { const t = l.getTooltip && l.getTooltip(); if (t) l[z >= 18 ? 'openTooltip' : 'closeTooltip'](); });
+  const z = map.getZoom(), c = map.getContainer().classList;
+  c.toggle('z-lt17', z < 17); c.toggle('z-lt18', z < 18); c.toggle('z-lt19', z < 19);
 }
 map.on('zoomend', updateLabelVisibility);
 
 function applyLayerVisibility() {
   const ly = S.settings.layers;
   const tog = (lyr, on) => { if (!lyr) return; if (on && !map.hasLayer(lyr)) map.addLayer(lyr); if (!on && map.hasLayer(lyr)) map.removeLayer(lyr); };
-  tog(L_.heritage, ly.heritage); tog(L_.plan, ly.plan); tog(L_.site, ly.site); tog(L_.osm, ly.osm);
-  tog(L_.landmarks, ly.landmarks); tog(L_.survey, ly.survey);
+  tog(L_.buildings, ly.buildings); tog(L_.heritage, ly.heritage); tog(L_.plan, ly.plan); tog(L_.site, ly.site);
+  tog(L_.landmarks, ly.landmarks); tog(L_.survey, ly.survey); tog(L_.thumbs, ly.thumbs);
   updateLabelVisibility();
 }
 
 async function loadStatic() {
   const get = u => fetch(u, { cache: 'no-cache' }).then(r => { if (!r.ok) throw new Error(u); return r.json(); });
-  const [her, corners, site, osm, lm] = await Promise.all([
-    get('data/heritage.geojson'), get('data/plan_corners.json'), get('data/site.geojson'),
-    get('data/osm_buildings.geojson'), get('data/landmarks.geojson'),
+  const [her, bld, corners, site, lm] = await Promise.all([
+    get('data/heritage.geojson'), get('data/buildings.geojson'), get('data/plan_corners.json'), get('data/site.geojson'), get('data/landmarks.geojson'),
   ]);
-  S.heritageGeo = her; S.planCorners = corners;
-  L.geoJSON(site, { style: { color: '#ffd166', weight: 2.5, dashArray: '8 6', fill: false, interactive: false } }).addTo(L_.site);
-  L.geoJSON(osm, {
-    style: { color: '#f7f1e8', weight: 1, fillColor: '#ffffff', fillOpacity: .15 },
-    onEachFeature: (f, l) => { if (f.properties.name) l.bindTooltip(f.properties.name, { className: 'lbl', sticky: true }); },
-  }).addTo(L_.osm);
+  S.heritageGeo = her; S.buildingsGeo = bld; S.planCorners = corners;
+  S.geoIndex = new Map([...her.features, ...bld.features].map(f => [f.properties.id, f]));
+  L.geoJSON(site, { style: { color: '#ffd166', weight: 2, dashArray: '8 6', fill: false, interactive: false } }).addTo(L_.site);
   L.geoJSON(lm, {
-    pointToLayer: (f, ll) => L.marker(ll, { icon: L.divIcon({ className: '', html: '<div class="lm"></div>', iconSize: [10, 10], iconAnchor: [5, 5] }) }),
+    pointToLayer: (f, ll) => L.marker(ll, { pane: 'surveyPane', icon: L.divIcon({ className: '', html: '<div class="lm"></div>', iconSize: [10, 10], iconAnchor: [5, 5] }) }),
     onEachFeature: (f, l) => {
-      l.bindTooltip(f.properties.name, { permanent: true, direction: 'top', offset: [0, -6], className: 'lbl' });
+      l.bindTooltip(esc(f.properties.name), { permanent: true, direction: 'top', offset: [0, -6], className: 'lbl lbl-lm' });
       l.on('click', () => openLandmark(f));
     },
   }).addTo(L_.landmarks);
@@ -377,7 +428,7 @@ async function renderPhotoGrid(el, ids, onRemove) {
   for (const id of ids) {
     const d = document.createElement('div'); d.className = 'ph';
     d.style.backgroundImage = `url(${await photoUrl(id)})`;
-    d.onclick = async () => { const lb = $('#lightbox'); $('img', lb).src = await photoUrl(id, false); lb.hidden = false; };
+    d.onclick = () => openGallery(ids, ids.indexOf(id));
     if (onRemove) {
       const b = document.createElement('button'); b.textContent = '✕'; b.title = 'إزالة الصورة';
       b.onclick = e => { e.stopPropagation(); onRemove(id); }; d.appendChild(b);
@@ -385,7 +436,31 @@ async function renderPhotoGrid(el, ids, onRemove) {
     el.appendChild(d);
   }
 }
-$('#lightbox').onclick = () => ($('#lightbox').hidden = true);
+
+// full-screen gallery: swipe / arrows / keyboard
+const GAL = { ids: [], i: 0 };
+async function showGal() {
+  const lb = $('#lightbox'), id = GAL.ids[GAL.i];
+  $('img', lb).src = await photoUrl(id, false);
+  const p = await DB.get('photos', id);
+  $('.lb-cap', lb).textContent = `${GAL.i + 1} / ${GAL.ids.length}${p?.observer ? ' · ' + p.observer : ''}${p?.created ? ' · ' + fmtDate(p.created) : ''}`;
+  $('.lb-prev', lb).hidden = $('.lb-next', lb).hidden = GAL.ids.length < 2;
+}
+function openGallery(ids, i = 0) { GAL.ids = ids; GAL.i = Math.max(0, i); $('#lightbox').hidden = false; showGal(); }
+function galStep(d) { GAL.i = (GAL.i + d + GAL.ids.length) % GAL.ids.length; showGal(); }
+(() => {
+  const lb = $('#lightbox');
+  lb.addEventListener('click', e => {
+    if (e.target.closest('.lb-prev')) return galStep(1);      // RTL: the right-hand arrow goes back
+    if (e.target.closest('.lb-next')) return galStep(-1);
+    if (e.target.closest('.lb-dl')) { const a = document.createElement('a'); a.href = $('img', lb).src; a.download = GAL.ids[GAL.i] + '.jpg'; a.click(); return; }
+    if (e.target.tagName !== 'IMG') lb.hidden = true;
+  });
+  let x0 = null;
+  lb.addEventListener('touchstart', e => (x0 = e.touches[0].clientX), { passive: true });
+  lb.addEventListener('touchend', e => { if (x0 == null) return; const dx = e.changedTouches[0].clientX - x0; if (Math.abs(dx) > 50) galStep(dx > 0 ? 1 : -1); x0 = null; });
+  addEventListener('keydown', e => { if (lb.hidden) return; if (e.key === 'Escape') lb.hidden = true; if (e.key === 'ArrowLeft') galStep(1); if (e.key === 'ArrowRight') galStep(-1); });
+})();
 
 // ---------------------------------------------------------------- sheet
 let sheetCleanup = null;
@@ -443,7 +518,7 @@ const PANELS = {
         <button class="tile" data-a="track"><span class="ico" style="background:#1a73e8"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="6"/></svg></span><span><b>سجّل مشيتي</b><small>يرسم مسارك تلقائياً وأنت تمشي بالدربونة</small></span></button>
         <button class="tile" data-a="photo"><span class="ico"><svg viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg></span><span><b>صورة سريعة</b><small>صوّر وتنحفظ بمكانك فوراً</small></span></button>
       </div>
-      <p class="muted" style="margin-top:12px">حتى توثّق مبنى من مباني الحفاظ (الجوزي) دوس عليه بالخريطة مباشرة.</p>`,
+      <p class="muted" style="margin-top:12px">حتى توثّق أي مبنى (حفاظ أو غيره) أو تضيفله صور، دوس عليه بالخريطة مباشرة.</p>`,
     body => body.addEventListener('click', e => {
       const a = e.target.closest('[data-a]')?.dataset.a; if (!a) return;
       closeSheet();
@@ -462,13 +537,14 @@ const PANELS = {
       <h3>الخريطة الأساسية</h3>
       <div class="basemaps">${Object.entries(BASEMAPS).map(([k, b]) => `<button data-bm="${k}" class="${S.settings.basemap === k ? 'on' : ''}">${b.name}</button>`).join('')}</div>
       <h3>طبقات السايت</h3>
-      ${swHtml('heritage', 'مباني الحفاظ', `${S.heritageGeo?.features.length || 0} مبنى من مخطط الحفاظ`, ly.heritage, 'background:#8b3a1a')}
-      ${swHtml('heritageLabels', 'أرقام / أسماء مباني الحفاظ', 'تظهر عند التقريب', ly.heritageLabels)}
+      ${swHtml('heritage', 'مباني الحفاظ', `${S.heritageGeo?.features.length || 0} مبنى — مطابقة على بصمات المباني الحقيقية`, ly.heritage, 'background:#9c3d16')}
+      ${swHtml('heritageLabels', 'أرقام مباني الحفاظ', 'تظهر عند التقريب الكبير', ly.heritageLabels)}
       ${swHtml('plan', 'المخطط الأصلي (صورة)', 'مخطط الحفاظ فوق الصورة الجوية', ly.plan, 'background:linear-gradient(135deg,#fff 50%,#8b3a1a 50%)')}
       <div id="planOp" ${ly.plan ? '' : 'hidden'}><label class="f"><span>شفافية المخطط</span><input type="range" min="0.1" max="1" step="0.05" value="${S.settings.planOpacity}"></label></div>
       ${swHtml('survey', 'رصدنا الميداني', `${S.features.size} عنصر`, ly.survey, 'background:#e67e22')}
       ${swHtml('landmarks', 'معالم معروفة', 'من OpenStreetMap', ly.landmarks, 'background:#fff;border:3px solid #1d5f8a')}
-      ${swHtml('osm', 'بصمات المباني (OSM)', 'كل المباني المرسومة بالـ OSM', ly.osm, 'background:rgba(255,255,255,.4);border:1px solid #999')}
+      ${swHtml('buildings', 'كل المباني', `${S.buildingsGeo?.features.length || 0} بصمة مبنى حقيقية — دوس على أي مبنى لتوثيقه`, ly.buildings, 'background:rgba(255,255,255,.25);border:1px solid #fff')}
+      ${swHtml('thumbs', 'صور المباني على الخريطة', 'تظهر صورة مصغّرة فوق كل مبنى مصوّر', ly.thumbs, 'background:#ccc;border-radius:50%')}
       ${swHtml('site', 'حدود السايت', '', ly.site, 'border:2px dashed #ffd166')}
       <h3>تلوين مباني الحفاظ</h3>
       ${chipsHtml('hmode', [['status', 'موثّق / غير موثّق'], ['condition', 'حسب الحالة الإنشائية'], ['plain', 'لون واحد']], S.settings.heritageMode)}
@@ -480,7 +556,7 @@ const PANELS = {
       const legend = () => {
         const m = S.settings.heritageMode;
         $('#hLegend', body).innerHTML = m === 'status'
-          ? `<span><i class="swatch" style="background:#8b3a1a;border:3px solid #2f8a4c"></i>موثّق (زرناه)</span><span><i class="swatch" style="background:#8b3a1a;border:2px dashed #fff3e6;outline:1px solid #8b3a1a"></i>بعد ما انوثّق</span>`
+          ? `<span><i class="swatch" style="background:#9c3d16;border:3px solid #3ddc84"></i>موثّق (زرناه)</span><span><i class="swatch" style="background:#9c3d16;border:1px solid #ffe2c8"></i>بعد ما انوثّق</span><span><i class="swatch" style="background:#2e86ab"></i>مبنى عادي موثّق</span>`
           : m === 'condition' ? CONDITIONS.map(c => `<span><i class="swatch" style="background:${c[2]}"></i>${c[1]}</span>`).join('') + '<span><i class="swatch" style="background:#bbb"></i>غير مقيّم</span>' : '';
       };
       legend();
@@ -507,7 +583,7 @@ const PANELS = {
 
   analysis() { openSheet('تحليل السايت', analysisHtml(), body => {
     body.addEventListener('click', e => {
-      const go = e.target.closest('[data-goh]'); if (go) { flyToHeritage(go.dataset.goh); closeSheet(); }
+      const go = e.target.closest('[data-goh]'); if (go) { flyToBuilding(go.dataset.goh); closeSheet(); }
     });
   }); },
 
@@ -538,7 +614,7 @@ const PANELS = {
       $('#lsort', body).onclick = e => { const b = e.target.closest('.chip'); if (!b) return; mode = b.dataset.v; $$('#lsort .chip', body).forEach(x => x.classList.toggle('on', x === b)); draw(); };
       $('#lres', body).onclick = e => {
         const k = e.target.closest('[data-open]')?.dataset.open; if (!k) return;
-        if (k.startsWith('H')) { flyToHeritage(k); openHeritage(k); }
+        if (S.geoIndex.has(k)) { flyToBuilding(k); openBuilding(k); }
         else { flyToFeature(k); openFeature(k); }
       };
       draw();
@@ -596,9 +672,14 @@ function featureCenter(f) {
   if (f.geometry.type === 'Point') return [f.geometry.coordinates[1], f.geometry.coordinates[0]];
   const c = turf.centroid(f).geometry.coordinates; return [c[1], c[0]];
 }
-function heritageFeature(hid) {
-  const f = S.heritageGeo.features.find(x => x.properties.id === hid);
+function buildingFeature(id) {
+  const f = S.geoIndex?.get(id);
   return f && { type: 'Feature', properties: f.properties, geometry: calibGeo(f.geometry) };
+}
+// a point guaranteed inside the shape (centroid can fall in a courtyard)
+function labelPoint(f) {
+  if (f.geometry.type === 'Point') return [f.geometry.coordinates[1], f.geometry.coordinates[0]];
+  try { const c = turf.pointOnFeature(f).geometry.coordinates; return [c[1], c[0]]; } catch { return featureCenter(f); }
 }
 function distTo(latlng) { return S.me ? map.distance([S.me.lat, S.me.lng], latlng) : null; }
 
@@ -610,16 +691,17 @@ function listItems() {
       search: `${p.notes || ''} ${p.observer || ''}`, color, photo: p.photos?.[0], updated: p.updated, dist: distTo(featureCenter(f)) });
   }
   for (const r of S.heritage.values()) {
-    if (!r.visited && !r.name && !(r.photos || []).length) continue;
-    const f = heritageFeature(r.id); if (!f) continue;
-    out.push({ key: r.id, title: r.name || `مبنى حفاظ ${r.id}`, sub: `مبنى حفاظ ${r.id}${r.condition ? ' · ' + condOf(r.condition)?.[1] : ''}`,
-      search: r.notes || '', color: '#8b3a1a', photo: r.photos?.[0], updated: r.updated, dist: distTo(featureCenter(f)) });
+    if (!isDocumented(r)) continue;
+    const f = buildingFeature(r.id); if (!f) continue;
+    const her = isHeritageId(r.id);
+    out.push({ key: r.id, title: buildingTitle(r.id, r), sub: `${her ? 'مبنى حفاظ' : 'مبنى'} ${r.id}${r.condition ? ' · ' + condOf(r.condition)?.[1] : ''}${(r.photos || []).length ? ' · ' + r.photos.length + ' صورة' : ''}`,
+      search: `${r.notes || ''} ${r.use || ''} ${r.id}`, color: her ? '#9c3d16' : '#2e86ab', photo: r.photos?.[0], updated: r.updated, dist: distTo(featureCenter(f)) });
   }
   return out;
 }
 function todoHeritage() {
   return S.heritageGeo.features.filter(f => !S.heritage.get(f.properties.id)?.visited).map(f => {
-    const hf = heritageFeature(f.properties.id);
+    const hf = buildingFeature(f.properties.id);
     return { key: f.properties.id, title: `مبنى حفاظ ${f.properties.id}`, sub: `${fmtArea(f.properties.area_m2)}${f.properties.courtyard ? ' · بيه حوش' : ''}`,
       search: '', color: '#8b3a1a', dist: distTo(featureCenter(hf)) };
   });
@@ -630,8 +712,8 @@ function flyToFeature(id) {
   if (f.geometry.type === 'Point') map.flyTo(featureCenter(f), Math.max(map.getZoom(), 19));
   else map.flyToBounds(L.geoJSON(f).getBounds(), { maxZoom: 20, padding: [40, 40] });
 }
-function flyToHeritage(hid) {
-  const f = heritageFeature(hid); if (!f) return;
+function flyToBuilding(hid) {
+  const f = buildingFeature(hid); if (!f) return;
   map.flyToBounds(L.geoJSON(f).getBounds(), { maxZoom: 20, padding: [60, 60] });
 }
 
@@ -760,44 +842,102 @@ function editShape(id) {
   ]);
 }
 
-// ---------------------------------------------------------------- heritage records
-function openHeritage(hid) {
-  const base = S.heritageGeo.features.find(x => x.properties.id === hid); if (!base) return;
-  const rec = { id: hid, visited: false, photos: [], ...(S.heritage.get(hid) || {}) };
-  let photos = [...(rec.photos || [])];
-  const hf = heritageFeature(hid), c = featureCenter(hf);
-  openSheet(rec.name || `مبنى حفاظ ${hid}`, `
-    <div class="kpis" style="margin-bottom:10px">
-      <div class="kpi"><b>${hid}</b><span>رقم المبنى</span></div>
-      <div class="kpi"><b>${Math.round(base.properties.area_m2)}</b><span>م² (تقريبي)</span></div>
-      <div class="kpi"><b>${S.me ? fmtLen(distTo(c)) : '—'}</b><span>يبعد عني</span></div>
+// ---------------------------------------------------------------- building records (heritage + every other footprint)
+const buildingTitle = (id, rec) => rec?.name || (isHeritageId(id) ? `مبنى حفاظ ${id}` : `مبنى ${id}`);
+async function addPhotosTo(id, capture) {
+  const files = await pickPhotos(capture); if (!files.length) return false;
+  toast('جاري حفظ الصور…');
+  const ids = await addPhotos(files);
+  const rec = { id, photos: [], ...(S.heritage.get(id) || {}) };
+  rec.photos = [...(rec.photos || []), ...ids];
+  if (!rec.visited) { rec.visited = true; rec.visitedAt = nowIso(); rec.visitedBy = S.settings.observer; }
+  await putHeritage(rec); restyle(id); renderThumbs();
+  toast(`انضافت ${ids.length} صورة ✓`);
+  return true;
+}
+
+// keep the selected thing visible next to / above the panel
+function ensureVisible(latlng) {
+  const r = $('#sheet').getBoundingClientRect(), p = map.latLngToContainerPoint(latlng);
+  if (innerWidth < 900) { if (p.y > r.top - 50) map.panBy([0, p.y - r.top / 2], { animate: true }); }
+  else if (p.x < r.right + 30) map.panBy([p.x - (r.right + innerWidth) / 2, 0], { animate: true });
+}
+function openBuilding(id) {
+  const base = S.geoIndex.get(id); if (!base) return;
+  const rec = S.heritage.get(id) || { id, photos: [] };
+  const f = buildingFeature(id), c = featureCenter(f), her = isHeritageId(id);
+  const cond = condOf(rec.condition);
+  select(id);
+  const rows = [
+    ['النوع', her ? '<span class="badge"><span class="dot" style="background:#9c3d16"></span>مبنى حفاظ</span>' : '<span class="badge"><span class="dot" style="background:#2e86ab"></span>مبنى</span>'],
+    cond && ['الحالة', `<span class="badge"><span class="dot" style="background:${cond[2]}"></span>${cond[1]}</span>`],
+    rec.floors && ['الطوابق', esc(rec.floors)], rec.era && ['الحقبة', esc(rec.era)],
+    rec.use && ['الاستعمال الحالي', esc(rec.use)], rec.use_orig && ['الاستعمال الأصلي', esc(rec.use_orig)],
+    rec.materials?.length && ['المواد', esc(rec.materials.join('، '))], rec.elements?.length && ['عناصر', esc(rec.elements.join('، '))],
+    ['المساحة', `${fmtArea(base.properties.area_m2)} (بصمة)`],
+    S.me && ['يبعد عني', fmtLen(distTo(c))],
+    rec.visitedAt && ['وثّقه', `${esc(rec.visitedBy || '—')} · ${fmtDate(rec.visitedAt)}`],
+  ].filter(Boolean);
+  const photos = rec.photos || [];
+  openSheet(buildingTitle(id, rec), `
+    <div class="hero" id="hero">${photos.length ? '' : `<div class="hero-empty"><svg viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg><span>ماكو صور لهذا المبنى بعد</span></div>`}</div>
+    <div class="row" style="margin:10px 0 4px">
+      <button class="btn primary" id="bCam">📷 صوّر المبنى</button>
+      <button class="btn" id="bGal">🖼 من المعرض</button>
     </div>
-    ${swHtml('visited', 'زرناه ووثّقناه', rec.visitedAt ? `${esc(rec.visitedBy || '')} · ${fmtDate(rec.visitedAt)}` : 'علّم عليه بعد ما توثّقه', rec.visited)}
+    <h3>${her ? 'مبنى حفاظ — ' : ''}<span dir="ltr">${id}</span></h3>
+    <dl class="kv">${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>
+    ${rec.notes ? `<h3>ملاحظات</h3><p style="white-space:pre-wrap;margin:0;font-size:14px;line-height:1.7">${esc(rec.notes)}</p>` : ''}
+    <div class="row" style="margin-top:14px">
+      <button class="btn primary" id="bEdit">${isDocumented(rec) ? 'تعديل التوثيق' : 'وثّق المبنى'}</button>
+      <a class="btn" href="https://www.google.com/maps/dir/?api=1&destination=${c[0]},${c[1]}&travelmode=walking" target="_blank" rel="noopener">اتجاهات</a>
+    </div>`, body => {
+    renderHero($('#hero', body), photos, id);
+    $('#bCam', body).onclick = async () => { if (await addPhotosTo(id, true)) openBuilding(id); };
+    $('#bGal', body).onclick = async () => { if (await addPhotosTo(id, false)) openBuilding(id); };
+    $('#bEdit', body).onclick = () => editBuilding(id);
+    return () => select(null);
+  });
+  ensureVisible(labelPoint(f));
+}
+
+function editBuilding(id) {
+  const rec = { id, visited: false, photos: [], ...(S.heritage.get(id) || {}) };
+  let photos = [...(rec.photos || [])];
+  select(id);
+  openSheet('توثيق ' + buildingTitle(id, rec), `
+    ${swHtml('visited', 'زرناه ووثّقناه', rec.visitedAt ? `${esc(rec.visitedBy || '')} · ${fmtDate(rec.visitedAt)}` : 'يتعلّم تلقائياً لمن تضيف صور أو معلومات', rec.visited)}
     <div style="height:10px"></div>
-    ${featureForm('point', rec, true)}
-    <div class="row" style="margin-top:8px"><a class="btn" href="https://www.google.com/maps/dir/?api=1&destination=${c[0]},${c[1]}&travelmode=walking" target="_blank" rel="noopener">اتجاهات للمبنى</a></div>
-  `, body => {
+    ${featureForm('point', rec, true)}`, body => {
     wireChips(body);
     const sw = $('.switch', body);
     sw.onclick = () => { rec.visited = !rec.visited; sw.classList.toggle('on', rec.visited); };
     const grid = $('#fph', body);
-    const redraw = () => renderPhotoGrid(grid, photos, id => { photos = photos.filter(x => x !== id); redraw(); });
+    const redraw = () => renderPhotoGrid(grid, photos, pid => { photos = photos.filter(x => x !== pid); redraw(); });
     redraw();
     const add = async cap => { const files = await pickPhotos(cap); if (!files.length) return; toast('جاري حفظ الصور…'); photos.push(...await addPhotos(files)); if (!rec.visited) { rec.visited = true; sw.classList.add('on'); } redraw(); };
     $('#cam', body).onclick = () => add(true);
     $('#gal', body).onclick = () => add(false);
-    $('#cancel', body).onclick = closeSheet;
+    $('#cancel', body).onclick = () => openBuilding(id);
     $('#save', body).onclick = async () => {
       const v = readForm(body, 'point'); delete v.category;
-      const was = S.heritage.get(hid)?.visited;
+      const was = S.heritage.get(id)?.visited;
       Object.assign(rec, v, { photos });
+      if (!rec.visited && isDocumented(rec)) rec.visited = true;
       if (rec.visited && !was) { rec.visitedAt = nowIso(); rec.visitedBy = S.settings.observer; }
-      await putHeritage(rec); renderHeritage(); closeSheet(); toast('انحفظ توثيق ' + hid + ' ✓');
+      await putHeritage(rec); renderHeritage(); toast('انحفظ ✓'); openBuilding(id);
     };
+    return () => select(null);
   });
-  // highlight
-  const hl = L.geoJSON(hf, { style: { color: '#ffd166', weight: 4, fill: false } }).addTo(L_.measure);
-  const prev = sheetCleanup; sheetCleanup = () => { prev && prev(); L_.measure.removeLayer(hl); };
+}
+
+// big swipeable photo strip at the top of a building card
+async function renderHero(el, ids, ownerId) {
+  if (!ids.length) return;
+  el.innerHTML = `<div class="hero-strip">${ids.map((pid, i) => `<button class="hero-ph" data-i="${i}" aria-label="صورة ${i + 1}"></button>`).join('')}</div><span class="hero-count">${ids.length} صورة</span>`;
+  const btns = $$('.hero-ph', el);
+  btns.forEach(async (b, i) => { b.style.backgroundImage = `url(${await photoUrl(ids[i], false)})`; });
+  el.onclick = e => { const b = e.target.closest('.hero-ph'); if (b) openGallery(ids, +b.dataset.i, ownerId); };
 }
 
 function openLandmark(f) {
@@ -814,6 +954,7 @@ function openLandmark(f) {
 function analysisHtml() {
   const H = S.heritageGeo.features, total = H.length;
   const visited = H.filter(f => S.heritage.get(f.properties.id)?.visited).length;
+  const otherDoc = [...S.heritage.values()].filter(r => !isHeritageId(r.id) && isDocumented(r)).length;
   const hArea = H.reduce((a, f) => a + f.properties.area_m2, 0);
   const court = H.filter(f => f.properties.courtyard).length;
   const pct = total ? Math.round(visited / total * 100) : 0;
@@ -851,7 +992,7 @@ function analysisHtml() {
     </div>
     <div style="margin-top:10px;display:flex;justify-content:space-between;font-size:13px"><span>تقدّم التوثيق</span><b>${visited} / ${total} (${pct}%)</b></div>
     <div class="progress"><i style="width:${pct}%"></i></div>
-    <p class="muted">${court} مبنى بيه حوش وسطي حسب المخطط · مساحة السايت ≈ ${fmtArea(siteArea)}</p>
+    <p class="muted">${court} مبنى بيه حوش وسطي · مساحة السايت ≈ ${fmtArea(siteArea)} · ${S.buildingsGeo.features.length} مبنى آخر بالسايت، وثّقتوا منها ${otherDoc}</p>
     ${nearest}
     <h3>الحالة الإنشائية (المقيّمة)</h3>
     ${Object.values(condCount).some(Boolean) ? `<div class="bars">${CONDITIONS.map(c => `<div class="bar"><span>${c[1]}</span><span class="t"><i style="width:${condCount[c[0]] / condMax * 100}%;background:${c[2]}"></i></span><span class="v">${condCount[c[0]]}</span></div>`).join('')}</div>` : '<p class="muted">بعد ما قيّمتوا حالة أي مبنى.</p>'}
@@ -889,7 +1030,21 @@ function addAtGps() {
   if (S.me.acc > 30) toast(`دقة الـ GPS ضعيفة (±${Math.round(S.me.acc)} م) — تأكد من المكان`);
   editFeature({ type: 'Point', coordinates: [S.me.lng, S.me.lat] }, 'point');
 }
+function buildingAt(lat, lng, maxDist = 6) {
+  const pt = turf.point([lng, lat]); let best = null, bd = Infinity;
+  for (const [id, f0] of S.geoIndex) {
+    const f = buildingFeature(id);
+    if (turf.booleanPointInPolygon(pt, f)) return id;
+    const [bx, by] = featureCenter(f); const d = map.distance([lat, lng], [bx, by]);
+    if (d < 40) { const dd = turf.pointToPolygonDistance ? turf.pointToPolygonDistance(pt, f, { units: 'meters' }) : d; if (dd < bd) { bd = dd; best = id; } }
+  }
+  return bd <= maxDist ? best : null;
+}
 async function quickPhoto() {
+  if (S.me) {
+    const id = buildingAt(S.me.lat, S.me.lng);
+    if (id && confirm(`انت يم «${buildingTitle(id, S.heritage.get(id))}». تضيف الصورة لهذا المبنى؟`)) { if (await addPhotosTo(id, true)) openBuilding(id); return; }
+  }
   const files = await pickPhotos(true); if (!files.length) return;
   const ids = await addPhotos(files);
   const c = S.me ? [S.me.lng, S.me.lat] : [map.getCenter().lng, map.getCenter().lat];
@@ -1064,7 +1219,7 @@ function openCalibration() {
 async function buildExport() {
   const feats = [...S.features.values()].map(f => ({ ...f, geometry: { ...f.geometry } }));
   const heritageRecs = [...S.heritage.values()];
-  const heritageFC = { type: 'FeatureCollection', features: heritageRecs.map(r => ({ ...heritageFeature(r.id), properties: { ...heritageFeature(r.id).properties, ...r, hid: r.id } })) };
+  const heritageFC = { type: 'FeatureCollection', features: heritageRecs.filter(r => buildingFeature(r.id)).map(r => ({ ...buildingFeature(r.id), properties: { ...buildingFeature(r.id).properties, ...r, hid: r.id } })) };
   return { feats, heritageRecs, heritageFC };
 }
 function download(blob, name) {
@@ -1097,7 +1252,7 @@ async function exportZip(share) {
 }
 async function exportGeoJSON() {
   const { feats, heritageFC } = await buildExport();
-  const all = { type: 'FeatureCollection', features: [...feats.map(f => ({ ...f, properties: { ...f.properties, photos: (f.properties.photos || []).join(';') } })), ...heritageFC.features.map(f => ({ ...f, properties: { ...f.properties, kind: 'heritage', photos: (f.properties.photos || []).join(';') } }))] };
+  const all = { type: 'FeatureCollection', features: [...feats.map(f => ({ ...f, properties: { ...f.properties, photos: (f.properties.photos || []).join(';') } })), ...heritageFC.features.map(f => ({ ...f, properties: { ...f.properties, kind: isHeritageId(f.properties.hid) ? 'heritage' : 'building', photos: (f.properties.photos || []).join(';') } }))] };
   download(new Blob([JSON.stringify(all)], { type: 'application/geo+json' }), `site-survey_${stamp()}.geojson`);
 }
 function csvText() {
@@ -1111,8 +1266,8 @@ function csvText() {
     rows.push(cols.map(k => q(o[k])).join(','));
   }
   for (const r of S.heritage.values()) {
-    const hf = heritageFeature(r.id); if (!hf) continue; const c = featureCenter(hf);
-    const o = { ...r, kind: 'heritage', category: 'مبنى حفاظ', condition: condOf(r.condition)?.[1] || '', lat: c[0].toFixed(6), lng: c[1].toFixed(6), area_m2: hf.properties.area_m2, photos: (r.photos || []).length, observer: r.visitedBy, created: r.visitedAt };
+    const hf = buildingFeature(r.id); if (!hf) continue; const c = featureCenter(hf);
+    const o = { ...r, kind: isHeritageId(r.id) ? 'heritage' : 'building', category: isHeritageId(r.id) ? 'مبنى حفاظ' : 'مبنى', condition: condOf(r.condition)?.[1] || '', lat: c[0].toFixed(6), lng: c[1].toFixed(6), area_m2: hf.properties.area_m2, photos: (r.photos || []).length, observer: r.visitedBy, created: r.visitedAt };
     rows.push(cols.map(k => q(o[k])).join(','));
   }
   return rows.join('\n');
@@ -1140,7 +1295,7 @@ function importFile() {
           if (zip.file('heritage_records.json')) nH += await mergeHeritage(JSON.parse(await zip.file('heritage_records.json').async('string')));
         } else {
           const gj = JSON.parse(await file.text());
-          nF += await mergeFeatures((gj.features || []).filter(f => f.properties?.kind !== 'heritage').map(f => {
+          nF += await mergeFeatures((gj.features || []).filter(f => !['heritage', 'building'].includes(f.properties?.kind)).map(f => {
             const p = { ...f.properties }; if (typeof p.photos === 'string') p.photos = p.photos ? p.photos.split(';') : [];
             if (!p.id) p.id = uid('F'); if (!p.kind) p.kind = f.geometry.type === 'Point' ? 'point' : /Line/.test(f.geometry.type) ? 'line' : 'polygon';
             if (!p.category) p.category = 'other'; return { ...f, properties: p };
@@ -1214,14 +1369,17 @@ async function doSearch(q, remote) {
   const box = $('#searchResults');
   if (q.length < 2) { box.hidden = true; return; }
   const local = [
-    ...listItems().filter(it => (it.title + ' ' + it.search).includes(q)).map(it => ({ label: it.title, sub: 'من رصدنا', go: () => { if (it.key.startsWith('H')) { flyToHeritage(it.key); openHeritage(it.key); } else { flyToFeature(it.key); openFeature(it.key); } } })),
+    ...listItems().filter(it => (it.title + ' ' + it.search).includes(q)).map(it => ({ label: it.title, sub: 'من رصدنا', go: () => { if (S.geoIndex.has(it.key)) { flyToBuilding(it.key); openBuilding(it.key); } else { flyToFeature(it.key); openFeature(it.key); } } })),
   ];
   L_.landmarks.eachLayer(g => (g.eachLayer ? g.eachLayer(l => {
     const f = l.feature; if (f && (f.properties.name.includes(q) || (f.properties.name_en || '').toLowerCase().includes(q.toLowerCase())))
       local.push({ label: f.properties.name, sub: 'معلم', go: () => { map.flyTo(l.getLatLng(), 19); openLandmark(f); } });
   }) : null));
-  const hm = q.match(/^h?(\d{1,3})$/i);
-  if (hm) { const id = 'H' + hm[1].padStart(3, '0'); if (S.heritageGeo.features.some(f => f.properties.id === id)) local.unshift({ label: `مبنى حفاظ ${id}`, sub: 'مباني الحفاظ', go: () => { flyToHeritage(id); openHeritage(id); } }); }
+  const hm = q.match(/^([hb])?\s*(\d{1,4})$/i);
+  if (hm) {
+    const pre = (hm[1] || 'h').toUpperCase(), id = pre + hm[2].padStart(pre === 'H' ? 3 : 4, '0');
+    if (S.geoIndex.has(id)) local.unshift({ label: buildingTitle(id, S.heritage.get(id)), sub: pre === 'H' ? 'مباني الحفاظ' : 'المباني', go: () => { flyToBuilding(id); openBuilding(id); } });
+  }
   const render = (remoteRes = []) => {
     const all = [...local.slice(0, 8), ...remoteRes];
     box.innerHTML = all.length ? all.map((r, i) => `<button type="button" data-i="${i}">${esc(r.label)}<small>${esc(r.sub)}</small></button>`).join('') : '<button type="button" disabled>ماكو نتائج</button>';
@@ -1240,6 +1398,7 @@ async function doSearch(q, remote) {
 
 // long-press / right-click on map → add point there
 map.on('contextmenu', e => editFeature({ type: 'Point', coordinates: [e.latlng.lng, e.latlng.lat] }, 'point'));
+map.on('click', () => { if (S.selected && !$('#sheet').hidden) closeSheet(); });
 $('#btnSite').onclick = () => map.flyTo(SITE_CENTER, SITE_ZOOM);
 
 // ---------------------------------------------------------------- boot
@@ -1248,7 +1407,7 @@ $('#btnSite').onclick = () => map.flyTo(SITE_CENTER, SITE_ZOOM);
   applyTheme();
   setBasemap(S.settings.basemap in BASEMAPS ? S.settings.basemap : 'sat');
   try { await loadStatic(); } catch (e) { console.error(e); toast('تعذّر تحميل طبقات السايت'); }
-  renderHeritage(); renderPlan(); renderSurvey(); applyLayerVisibility(); setTimeout(updateLabelVisibility, 50);
+  renderHeritage(); renderPlan(); renderSurvey(); applyLayerVisibility();
   if (navigator.storage?.persist) navigator.storage.persist().catch(() => {});
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
   if (!S.settings.observer) setTimeout(() => toast('من «المزيد» اكتب اسمك حتى يبين على رصدك', 4000), 1200);

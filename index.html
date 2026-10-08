@@ -16,7 +16,7 @@
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <link rel="stylesheet" href="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.17.0/dist/leaflet-geoman.css">
-<link rel="stylesheet" href="app.css?v=5">
+<link rel="stylesheet" href="app.css?v=7">
 </head>
 <body>
 <header class="topbar">
@@ -77,13 +77,13 @@
   <div class="sheet-body" id="sheetBody"></div>
 </section>
 
-<div class="lightbox" id="lightbox" hidden><img alt=""><button class="icon-btn" aria-label="إغلاق">✕</button></div>
+<div class="lightbox" id="lightbox" hidden><img alt=""><div class="lb-cap"></div><button class="lb-prev" aria-label="السابقة">›</button><button class="lb-next" aria-label="التالية">‹</button><button class="lb-dl">حفظ الصورة</button><button class="icon-btn" aria-label="إغلاق">✕</button></div>
 <div class="toast" id="toast" role="status" hidden></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.17.0/dist/leaflet-geoman.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@turf/turf@7.1.0/turf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-<script src="app.js?v=5"></script>
+<script src="app.js?v=7"></script>
 </body>
 </html>
