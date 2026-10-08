@@ -3,6 +3,7 @@
 'use strict';
 
 // ---------------------------------------------------------------- constants
+const DATA_VERSION = '11';    // bump when files in data/ change (also in sw.js)
 const SITE_CENTER = [33.3387, 44.3935];
 const SITE_ZOOM = 17;
 const BAGHDAD_VIEWBOX = '44.20,33.45,44.55,33.20';
@@ -131,6 +132,8 @@ function calibLL(lat, lng) {
   return [ANCHOR[0] + Y / KY, ANCHOR[1] + X / KX];
 }
 function calibGeo(geom) {
+  const { dx, dy, rot, scale } = S.calib;
+  if (!dx && !dy && !rot && scale === 1) return geom;
   const tr = ring => ring.map(([lng, lat]) => { const [a, b] = calibLL(lat, lng); return [b, a]; });
   if (geom.type === 'Polygon') return { type: 'Polygon', coordinates: geom.coordinates.map(tr) };
   if (geom.type === 'MultiPolygon') return { type: 'MultiPolygon', coordinates: geom.coordinates.map(p => p.map(tr)) };
@@ -215,8 +218,22 @@ map.createPane('buildingsPane').style.zIndex = 405;
 map.createPane('thumbPane').style.zIndex = 640;
 const bRenderer = L.canvas({ pane: 'buildingsPane', tolerance: 4 });
 const hRenderer = L.svg({ pane: 'heritagePane' });
+const ctxRenderer = L.canvas({ pane: 'contextPane', tolerance: 2 });
 
 const isHeritageId = id => /^H/.test(id);
+
+// lazy labels: bound only while the zoom is high enough, so the map is not dragging hundreds of tooltips around
+function lazyLabel(layer, text, opts, minZ) { layer._lz = { text, opts: { permanent: true, interactive: false, ...opts }, minZ }; }
+function syncLabels() {
+  const z = map.getZoom();
+  for (const g of [L_.heritage, L_.buildings, L_.streets, L_.landmarks, L_.survey]) g.eachLayer(l => {
+    const s = l._lz;
+    if (!s) { return; }
+    const want = z >= s.minZ;
+    if (want && !l.getTooltip()) l.bindTooltip(s.text, s.opts);
+    else if (!want && l.getTooltip()) l.unbindTooltip();
+  });
+}
 const isDocumented = r => !!(r && (r.visited || r.name || (r.photos || []).length || r.condition));
 
 // building height (floors): field record wins, else CAD/OSM survey value
@@ -274,10 +291,11 @@ function renderStreets() {
     }
     const [label, color, w] = STREET_KINDS[p.kind] || STREET_KINDS.alley;
     const lyr = L.geoJSON({ type: 'Feature', properties: p, geometry: g }, { style: { renderer: sr, color, weight: w, opacity: .9, lineCap: 'round', dashArray: p.kind === 'lane' ? '4 6' : null } });
-    if (p.name && longest.get(p.name) === p) lyr.bindTooltip(esc(p.name), { permanent: true, direction: 'center', className: 'lbl lbl-street', interactive: false });
+    if (p.name && longest.get(p.name) === p) lazyLabel(lyr, esc(p.name), { direction: 'center', className: 'lbl lbl-street' }, 17);
     lyr.on('click', e => { L.DomEvent.stopPropagation(e); openStreet(p.sid); });
     L_.streets.addLayer(lyr);
   }
+  syncLabels();
 }
 function openStreet(sid) {
   const f = S.streetsGeo.features.find(x => x.properties.sid === sid); if (!f) return;
@@ -312,15 +330,27 @@ function renderHeritage() {
       const lyr = L.geoJSON({ type: 'Feature', properties: f.properties, geometry: calibGeo(f.geometry) }, { style: () => styleFn(id) });
       lyr.on('click', e => { L.DomEvent.stopPropagation(e); openBuilding(id); });
       const rec = S.heritage.get(id);
-      if (rec && rec.name) lyr.bindTooltip(esc(rec.name), { permanent: true, direction: 'center', className: 'lbl lbl-name', interactive: false });
-      else if (isHeritageId(id) && S.settings.layers.heritageLabels) lyr.bindTooltip(id, { permanent: true, direction: 'center', className: 'lbl lbl-id', interactive: false });
+      setBuildingLabel(lyr, id);
       geoLayers.set(id, lyr); group.addLayer(lyr);
     }
   };
   if (S.buildingsGeo) add(S.buildingsGeo, L_.buildings, buildingStyle);
   add(S.heritageGeo, L_.heritage, heritageStyle);
-  renderThumbs();
+  renderThumbs(); syncLabels();
 }
+function setBuildingLabel(lyr, id) {
+  const rec = S.heritage.get(id);
+  if (lyr.getTooltip()) lyr.unbindTooltip();
+  lyr._lz = null;
+  if (rec && rec.name) lazyLabel(lyr, esc(rec.name), { direction: 'center', className: 'lbl lbl-name' }, 17);
+  else if (isHeritageId(id) && S.settings.layers.heritageLabels) lazyLabel(lyr, id, { direction: 'center', className: 'lbl lbl-id' }, 19);
+}
+// cheap refresh after editing one building (no full rebuild of 1000 layers)
+function refreshBuilding(id) {
+  const l = geoLayers.get(id); if (!l) return;
+  restyle(id); setBuildingLabel(l, id); syncLabels(); renderThumbs();
+}
+function restyleAll() { geoLayers.forEach((l, id) => l.setStyle(isHeritageId(id) ? heritageStyle(id) : buildingStyle(id))); }
 function restyle(id) {
   const l = geoLayers.get(id); if (!l) return;
   l.setStyle(isHeritageId(id) ? heritageStyle(id) : buildingStyle(id));
@@ -382,7 +412,7 @@ function surveyLayer(f) {
       : { pane: 'surveyPane', color, weight: 2, fillColor: color, fillOpacity: .35 };
     lyr = L.geoJSON(f, { style: () => style });
   }
-  if (p.name) lyr.bindTooltip(esc(p.name), { permanent: true, direction: kind === 'point' ? 'top' : 'center', offset: kind === 'point' ? [0, -12] : [0, 0], className: 'lbl lbl-name' });
+  if (p.name) lazyLabel(lyr, esc(p.name), { direction: kind === 'point' ? 'top' : 'center', offset: kind === 'point' ? [0, -12] : [0, 0], className: 'lbl lbl-name' }, 17);
   lyr.on('click', e => { L.DomEvent.stopPropagation(e); openFeature(f.properties.id); });
   lyr._fid = f.properties.id;
   return lyr;
@@ -394,13 +424,14 @@ function renderSurvey() {
     if (hidden.has(f.properties.kind + ':' + f.properties.category)) continue;
     L_.survey.addLayer(surveyLayer(f));
   }
-  renderThumbs();
+  renderThumbs(); syncLabels();
 }
 
 // label density by zoom is handled in CSS through classes on the map container
 function updateLabelVisibility() {
   const z = map.getZoom(), c = map.getContainer().classList;
   c.toggle('z-lt17', z < 17); c.toggle('z-lt18', z < 18); c.toggle('z-lt19', z < 19);
+  syncLabels();
 }
 map.on('zoomend', updateLabelVisibility);
 
@@ -413,14 +444,14 @@ function applyLayerVisibility() {
 }
 
 async function loadStatic() {
-  const get = u => fetch(u, { cache: 'no-cache' }).then(r => { if (!r.ok) throw new Error(u); return r.json(); });
+  const get = u => fetch(`${u}?v=${DATA_VERSION}`).then(r => { if (!r.ok) throw new Error(u); return r.json(); });
   const [her, bld, corners, site, lm, st, cadB, cadC] = await Promise.all([
-    get('data/heritage.geojson'), get('data/buildings.geojson'), get('data/plan_corners.json'), get('data/site.geojson'), get('data/landmarks.geojson'), get('data/streets.geojson').catch(() => null), get('data/context_buildings.geojson').catch(() => null), get('data/cad_contours.geojson').catch(() => null),
+    get('data/heritage.json'), get('data/buildings.json'), get('data/plan_corners.json'), get('data/site.json'), get('data/landmarks.json'), get('data/streets.json').catch(() => null), get('data/context_buildings.json').catch(() => null), get('data/cad_contours.json').catch(() => null),
   ]);
   S.heritageGeo = her; S.buildingsGeo = bld; S.planCorners = corners; S.streetsGeo = st;
   // surrounding city from the CAD (CADMapper/OSM) export, coloured by height
   if (cadB) L.geoJSON(cadB, {
-    style: f => ({ renderer: L.canvas({ pane: 'contextPane' }), color: '#3b2a1e', weight: .6, fillColor: floorColor(f.properties.floors) || '#ccc', fillOpacity: .55 }),
+    style: f => ({ renderer: ctxRenderer, color: '#3b2a1e', weight: .6, fillColor: floorColor(f.properties.floors) || '#ccc', fillOpacity: .55 }),
     onEachFeature: (f, l) => l.bindTooltip(f.properties.floors ? `${f.properties.floors} طابق · ${f.properties.height_m} م` : 'ارتفاع غير معروف', { sticky: true, className: 'lbl' }),
   }).addTo(L_.context);
   if (cadC) L.geoJSON(cadC, {
@@ -433,7 +464,7 @@ async function loadStatic() {
   L.geoJSON(lm, {
     pointToLayer: (f, ll) => L.marker(ll, { pane: 'surveyPane', icon: L.divIcon({ className: '', html: '<div class="lm"></div>', iconSize: [10, 10], iconAnchor: [5, 5] }) }),
     onEachFeature: (f, l) => {
-      l.bindTooltip(esc(f.properties.name), { permanent: true, direction: 'top', offset: [0, -6], className: 'lbl lbl-lm' });
+      lazyLabel(l, esc(f.properties.name), { direction: 'top', offset: [0, -6], className: 'lbl lbl-lm' }, 18);
       l.on('click', () => openLandmark(f));
     },
   }).addTo(L_.landmarks);
@@ -652,7 +683,7 @@ const PANELS = {
       });
       $('#planOp input', body).oninput = e => { S.settings.planOpacity = +e.target.value; L_.plan?.setOpacity(S.settings.planOpacity); saveSettings(); };
       $('.chips[data-name="hmode"]', body).addEventListener('change', () => {
-        S.settings.heritageMode = chipVal(body, 'hmode') || 'plain'; renderHeritage(); legend(); saveSettings();
+        S.settings.heritageMode = chipVal(body, 'hmode') || 'plain'; restyleAll(); legend(); saveSettings();
       });
       for (const k of ['point', 'line', 'polygon']) $(`.chips[data-name="cats-${k}"]`, body).addEventListener('change', () => {
         const all = ['point', 'line', 'polygon'].flatMap(kk => CATS[kk].map(c => kk + ':' + c[0]));
@@ -932,7 +963,7 @@ async function addPhotosTo(id, capture) {
   const rec = { id, photos: [], ...(S.heritage.get(id) || {}) };
   rec.photos = [...(rec.photos || []), ...ids];
   if (!rec.visited) { rec.visited = true; rec.visitedAt = nowIso(); rec.visitedBy = S.settings.observer; }
-  await putHeritage(rec); restyle(id); renderThumbs();
+  await putHeritage(rec); refreshBuilding(id);
   toast(`انضافت ${ids.length} صورة ✓`);
   return true;
 }
@@ -1007,7 +1038,7 @@ function editBuilding(id) {
       Object.assign(rec, v, { photos });
       if (!rec.visited && isDocumented(rec)) rec.visited = true;
       if (rec.visited && !was) { rec.visitedAt = nowIso(); rec.visitedBy = S.settings.observer; }
-      await putHeritage(rec); renderHeritage(); toast('انحفظ ✓'); openBuilding(id);
+      await putHeritage(rec); refreshBuilding(id); toast('انحفظ ✓'); openBuilding(id);
     };
     return () => select(null);
   });
@@ -1311,9 +1342,19 @@ function download(blob, name) {
 const stamp = () => new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
 const who = () => (S.settings.observer || 'survey').replace(/[^\p{L}\p{N}_-]+/gu, '_');
 
+let zipLib;
+function needZip() {
+  return zipLib || (zipLib = new Promise((res, rej) => {
+    const sc = document.createElement('script');
+    sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
+    sc.onload = () => res(window.JSZip); sc.onerror = () => { zipLib = null; rej(new Error('jszip')); };
+    document.head.appendChild(sc);
+  }));
+}
 async function exportZip(share) {
   if (!S.features.size && !S.heritage.size) return toast('ماكو بيانات حتى نصدّرها');
   toast('جاري تجهيز الملف…', 8000);
+  await needZip();
   const { feats, heritageRecs, heritageFC } = await buildExport();
   const zip = new JSZip();
   zip.file('survey.geojson', JSON.stringify({ type: 'FeatureCollection', features: feats }, null, 1));
@@ -1360,6 +1401,7 @@ function importFile() {
   const inp = document.createElement('input'); inp.type = 'file'; inp.accept = '.zip,.geojson,.json,application/zip,application/json'; inp.multiple = true;
   inp.onchange = async () => {
     let nF = 0, nH = 0, nP = 0;
+    if ([...inp.files].some(f => /\.zip$/i.test(f.name))) await needZip().catch(() => toast('تعذّر تحميل أداة ZIP — تأكد من النت'));
     for (const file of inp.files) {
       try {
         if (/\.zip$/i.test(file.name)) {
@@ -1491,7 +1533,7 @@ $('#btnSite').onclick = () => map.flyTo(SITE_CENTER, SITE_ZOOM);
   try { await loadStatic(); } catch (e) { console.error(e); toast('تعذّر تحميل طبقات السايت'); }
   renderHeritage(); renderStreets(); renderPlan(); renderSurvey(); applyLayerVisibility();
   if (navigator.storage?.persist) navigator.storage.persist().catch(() => {});
-  if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
+  if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) navigator.serviceWorker.register('sw.js').catch(() => {});
   if (!S.settings.observer) setTimeout(() => toast('من «المزيد» اكتب اسمك حتى يبين على رصدك', 4000), 1200);
 })();
 })();
