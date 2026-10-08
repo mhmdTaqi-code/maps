@@ -115,7 +115,7 @@ const S = {
   planCorners: null,
   calib: { dx: 0, dy: 0, rot: 0, scale: 1 },
   settings: { observer: '', basemap: 'sat', heritageMode: 'status', planOpacity: 0.55,
-    layers: { heritage: true, heritageLabels: true, buildings: true, thumbs: true, plan: false, site: true, landmarks: true, survey: true }, hiddenCats: [] },
+    layers: { heritage: true, heritageLabels: true, buildings: true, streets: true, thumbs: true, plan: false, site: true, landmarks: true, survey: true }, hiddenCats: [] },
   selected: null,
   me: null,              // last GPS fix {lat,lng,acc,heading}
   urls: new Map(),       // photo id -> object URL cache
@@ -134,6 +134,8 @@ function calibGeo(geom) {
   const tr = ring => ring.map(([lng, lat]) => { const [a, b] = calibLL(lat, lng); return [b, a]; });
   if (geom.type === 'Polygon') return { type: 'Polygon', coordinates: geom.coordinates.map(tr) };
   if (geom.type === 'MultiPolygon') return { type: 'MultiPolygon', coordinates: geom.coordinates.map(p => p.map(tr)) };
+  if (geom.type === 'LineString') return { type: 'LineString', coordinates: tr(geom.coordinates) };
+  if (geom.type === 'MultiLineString') return { type: 'MultiLineString', coordinates: geom.coordinates.map(tr) };
   return geom;
 }
 
@@ -201,9 +203,11 @@ const L_ = {
   landmarks: L.featureGroup(),
   survey: L.featureGroup(),
   thumbs: L.featureGroup(),
+  streets: L.featureGroup(),
   me: L.layerGroup().addTo(map),
   measure: L.layerGroup().addTo(map),
 };
+map.createPane('streetsPane').style.zIndex = 402;
 map.createPane('buildingsPane').style.zIndex = 405;
 map.createPane('thumbPane').style.zIndex = 640;
 const bRenderer = L.canvas({ pane: 'buildingsPane', tolerance: 4 });
@@ -215,7 +219,7 @@ const isDocumented = r => !!(r && (r.visited || r.name || (r.photos || []).lengt
 function heritageStyle(hid) {
   const rec = S.heritage.get(hid);
   const mode = S.settings.heritageMode;
-  let fill = '#9c3d16', stroke = '#ffe2c8', w = 1;
+  let fill = '#9c3d16', stroke = '#2a0f04', w = 1.3;
   if (mode === 'status') {
     if (rec && rec.visited) { stroke = '#3ddc84'; w = 2.6; }
   } else if (mode === 'condition') {
@@ -232,7 +236,57 @@ function buildingStyle(id) {
     const c = S.settings.heritageMode === 'condition' && condOf(rec.condition);
     return { renderer: bRenderer, color: '#bfe3ff', weight: 1.4, fillColor: c ? c[2] : '#2e86ab', fillOpacity: .55 };
   }
-  return { renderer: bRenderer, color: 'rgba(255,255,255,.75)', weight: .8, fillColor: '#ffffff', fillOpacity: .06 };
+  return { renderer: bRenderer, color: '#ffffff', weight: 1.3, opacity: .95, fillColor: '#ffffff', fillOpacity: .13 };
+}
+
+// street network vectorized from the plan: street space + centre-lines by type
+const STREET_KINDS = { street: ['شارع', '#ffd166', 5], alley: ['درب / دربونة', '#ff9f43', 3.5], lane: ['زقاق ضيّق', '#ff6b6b', 2.5] };
+function renderStreets() {
+  L_.streets.clearLayers();
+  if (!S.streetsGeo) return;
+  const sr = L.svg({ pane: 'streetsPane' });
+  // one label per real street name (OSM also carries block codes like "110-55" — skip those)
+  const realName = n => n && /[ء-ي]{3,}/.test(n) && !/^\d/.test(n);
+  const longest = new Map();
+  for (const f of S.streetsGeo.features) {
+    const p = f.properties; if (p.type !== 'centerline') continue;
+    if (!realName(p.name)) { p.name = null; continue; }
+    const cur = longest.get(p.name); if (!cur || cur.length_m < p.length_m) longest.set(p.name, p);
+  }
+  for (const f of S.streetsGeo.features) {
+    const g = calibGeo(f.geometry), p = f.properties;
+    if (p.type === 'area') {
+      L.geoJSON({ type: 'Feature', properties: p, geometry: g }, { interactive: false, style: { renderer: sr, stroke: false, fillColor: '#fff3d1', fillOpacity: .16 } }).addTo(L_.streets);
+      continue;
+    }
+    const [label, color, w] = STREET_KINDS[p.kind] || STREET_KINDS.alley;
+    const lyr = L.geoJSON({ type: 'Feature', properties: p, geometry: g }, { style: { renderer: sr, color, weight: w, opacity: .9, lineCap: 'round', dashArray: p.kind === 'lane' ? '4 6' : null } });
+    if (p.name && longest.get(p.name) === p) lyr.bindTooltip(esc(p.name), { permanent: true, direction: 'center', className: 'lbl lbl-street', interactive: false });
+    lyr.on('click', e => { L.DomEvent.stopPropagation(e); openStreet(p.sid); });
+    L_.streets.addLayer(lyr);
+  }
+}
+function openStreet(sid) {
+  const f = S.streetsGeo.features.find(x => x.properties.sid === sid); if (!f) return;
+  const p = f.properties, rec = S.heritage.get(sid) || { id: sid, photos: [] };
+  const [label, color] = STREET_KINDS[p.kind] || STREET_KINDS.alley;
+  const len = turf.length({ type: 'Feature', geometry: calibGeo(f.geometry) }) * 1000;
+  openSheet(rec.name || p.name || `${label} ${sid}`, `
+    <div class="hero" id="hero">${(rec.photos || []).length ? '' : `<div class="hero-empty"><span>ماكو صور لهذا المسار بعد</span></div>`}</div>
+    <div class="row" style="margin:10px 0 4px"><button class="btn primary" id="sCam">📷 صوّر المسار</button><button class="btn" id="sGal">🖼 من المعرض</button></div>
+    <dl class="kv">
+      <dt>النوع</dt><dd><span class="badge"><span class="dot" style="background:${color}"></span>${label}</span></dd>
+      <dt>العرض التقريبي</dt><dd>${p.width_m ?? '—'} م</dd>
+      <dt>الطول</dt><dd>${fmtLen(len)}</dd>
+      ${p.name ? `<dt>الاسم (OSM)</dt><dd>${esc(p.name)}</dd>` : ''}
+    </dl>
+    <label class="f" style="margin-top:12px"><span>ملاحظات (حركة، أرضية، إحساس المكان…)</span><textarea id="sNotes">${esc(rec.notes)}</textarea></label>
+    <button class="btn primary block" id="sSave">حفظ</button>`, body => {
+    renderHero($('#hero', body), rec.photos || [], sid);
+    $('#sCam', body).onclick = async () => { if (await addPhotosTo(sid, true)) openStreet(sid); };
+    $('#sGal', body).onclick = async () => { if (await addPhotosTo(sid, false)) openStreet(sid); };
+    $('#sSave', body).onclick = async () => { await putHeritage({ ...rec, id: sid, notes: $('#sNotes', body).value.trim() }); toast('انحفظ ✓'); };
+  });
 }
 
 const geoLayers = new Map();   // building id -> leaflet layer
@@ -341,16 +395,17 @@ function applyLayerVisibility() {
   const ly = S.settings.layers;
   const tog = (lyr, on) => { if (!lyr) return; if (on && !map.hasLayer(lyr)) map.addLayer(lyr); if (!on && map.hasLayer(lyr)) map.removeLayer(lyr); };
   tog(L_.buildings, ly.buildings); tog(L_.heritage, ly.heritage); tog(L_.plan, ly.plan); tog(L_.site, ly.site);
-  tog(L_.landmarks, ly.landmarks); tog(L_.survey, ly.survey); tog(L_.thumbs, ly.thumbs);
+  tog(L_.streets, ly.streets); tog(L_.landmarks, ly.landmarks); tog(L_.survey, ly.survey); tog(L_.thumbs, ly.thumbs);
   updateLabelVisibility();
 }
 
 async function loadStatic() {
   const get = u => fetch(u, { cache: 'no-cache' }).then(r => { if (!r.ok) throw new Error(u); return r.json(); });
-  const [her, bld, corners, site, lm] = await Promise.all([
-    get('data/heritage.geojson'), get('data/buildings.geojson'), get('data/plan_corners.json'), get('data/site.geojson'), get('data/landmarks.geojson'),
+  const [her, bld, corners, site, lm, st] = await Promise.all([
+    get('data/heritage.geojson'), get('data/buildings.geojson'), get('data/plan_corners.json'), get('data/site.geojson'), get('data/landmarks.geojson'), get('data/streets.geojson').catch(() => null),
   ]);
-  S.heritageGeo = her; S.buildingsGeo = bld; S.planCorners = corners;
+  S.heritageGeo = her; S.buildingsGeo = bld; S.planCorners = corners; S.streetsGeo = st;
+  st?.features.forEach((f, i) => (f.properties.sid = 'S' + String(i + 1).padStart(3, '0')));
   S.geoIndex = new Map([...her.features, ...bld.features].map(f => [f.properties.id, f]));
   L.geoJSON(site, { style: { color: '#ffd166', weight: 2, dashArray: '8 6', fill: false, interactive: false } }).addTo(L_.site);
   L.geoJSON(lm, {
@@ -543,7 +598,8 @@ const PANELS = {
       <div id="planOp" ${ly.plan ? '' : 'hidden'}><label class="f"><span>شفافية المخطط</span><input type="range" min="0.1" max="1" step="0.05" value="${S.settings.planOpacity}"></label></div>
       ${swHtml('survey', 'رصدنا الميداني', `${S.features.size} عنصر`, ly.survey, 'background:#e67e22')}
       ${swHtml('landmarks', 'معالم معروفة', 'من OpenStreetMap', ly.landmarks, 'background:#fff;border:3px solid #1d5f8a')}
-      ${swHtml('buildings', 'كل المباني', `${S.buildingsGeo?.features.length || 0} بصمة مبنى حقيقية — دوس على أي مبنى لتوثيقه`, ly.buildings, 'background:rgba(255,255,255,.25);border:1px solid #fff')}
+      ${swHtml('buildings', 'كل المباني', `${S.buildingsGeo?.features.length || 0} مبنى بحدوده من المخطط — دوس على أي مبنى لتوثيقه`, ly.buildings, 'background:rgba(255,255,255,.25);border:1.5px solid #fff')}
+      ${swHtml('streets', 'الشوارع والدرابين', 'شبكة المسارات: شارع / درب / زقاق ضيّق', ly.streets, 'background:linear-gradient(90deg,#ffd166 33%,#ff9f43 33% 66%,#ff6b6b 66%)')}
       ${swHtml('thumbs', 'صور المباني على الخريطة', 'تظهر صورة مصغّرة فوق كل مبنى مصوّر', ly.thumbs, 'background:#ccc;border-radius:50%')}
       ${swHtml('site', 'حدود السايت', '', ly.site, 'border:2px dashed #ffd166')}
       <h3>تلوين مباني الحفاظ</h3>
@@ -1202,7 +1258,7 @@ function openCalibration() {
     body.addEventListener('input', e => {
       const k = e.target.dataset.k; if (!k) return;
       S.calib[k] = +e.target.value; $('#v-' + k, body).textContent = S.calib[k];
-      cancelAnimationFrame(raf); raf = requestAnimationFrame(() => { renderHeritage(); renderPlan(); });
+      cancelAnimationFrame(raf); raf = requestAnimationFrame(() => { renderHeritage(); renderStreets(); renderPlan(); });
     });
     $('#cPlan', body).onclick = () => { S.settings.layers.plan = !S.settings.layers.plan; renderPlan(); applyLayerVisibility(); };
     $('#cSave', body).onclick = async () => { await saveCalib(); saveSettings(); closeSheet(); toast('انحفظت المعايرة'); };
@@ -1407,7 +1463,7 @@ $('#btnSite').onclick = () => map.flyTo(SITE_CENTER, SITE_ZOOM);
   applyTheme();
   setBasemap(S.settings.basemap in BASEMAPS ? S.settings.basemap : 'sat');
   try { await loadStatic(); } catch (e) { console.error(e); toast('تعذّر تحميل طبقات السايت'); }
-  renderHeritage(); renderPlan(); renderSurvey(); applyLayerVisibility();
+  renderHeritage(); renderStreets(); renderPlan(); renderSurvey(); applyLayerVisibility();
   if (navigator.storage?.persist) navigator.storage.persist().catch(() => {});
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
   if (!S.settings.observer) setTimeout(() => toast('من «المزيد» اكتب اسمك حتى يبين على رصدك', 4000), 1200);
