@@ -278,3 +278,18 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
 /* ---------- places & axes ---------- */
 .place-pin { border-radius: 50%; border: 2.5px solid #fff; box-shadow: 0 1px 5px rgba(0,0,0,.5); cursor: pointer; }
 .leaflet-tooltip.lbl-axis { background: rgba(90, 20, 140, .85); color: #fff; font-size: 11px; }
+
+/* ---------- modes ---------- */
+.modes { position: fixed; z-index: 1001; left: 50%; transform: translateX(-50%); top: calc(58px + env(safe-area-inset-top, 0px));
+  display: flex; background: var(--panel); border-radius: 999px; padding: 3px; box-shadow: var(--shadow); }
+.modes button { border: 0; background: none; color: var(--ink-2); padding: 6px 14px; border-radius: 999px; font-size: 13.5px; font-weight: 600; cursor: pointer; }
+.modes button.on { background: var(--accent); color: #fff; }
+.track-bar, .mode-bar { top: calc(104px + env(safe-area-inset-top, 0px)); }
+/* approximate heritage point */
+.hp-pin { width: 28px; height: 28px; border-radius: 50% 50% 50% 4px; transform: rotate(-45deg); background: #9c3d16; border: 2.5px solid #fff;
+  box-shadow: 0 2px 6px rgba(0,0,0,.5); display: grid; place-items: center; cursor: pointer; }
+.hp-pin span { transform: rotate(45deg); color: #fff; font: 700 10.5px "IBM Plex Sans Arabic", sans-serif; }
+.hp-pin.visited { border-color: #3ddc84; }
+.hp-pin.drawn { background: #6d2a0f; }
+.thumb-pin.hp-photo { border-color: #9c3d16; }
+.thumb-pin.hp-photo.visited { border-color: #3ddc84; }

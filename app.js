@@ -3,7 +3,7 @@
 'use strict';
 
 // ---------------------------------------------------------------- constants
-const DATA_VERSION = '13';    // bump when files in data/ change (also in sw.js)
+const DATA_VERSION = '17';    // bump when files in data/ change (also in sw.js)
 const SITE_CENTER = [33.3387, 44.3935];
 const SITE_ZOOM = 17;
 const BAGHDAD_VIEWBOX = '44.20,33.45,44.55,33.20';
@@ -115,8 +115,8 @@ const S = {
   heritageGeo: null,     // original heritage FeatureCollection
   planCorners: null,
   calib: { dx: 0, dy: 0, rot: 0, scale: 1 },
-  settings: { observer: '', basemap: 'sat', heritageMode: 'status', planOpacity: 0.55,
-    layers: { heritage: true, heritageLabels: true, buildings: true, streets: true, places: true, axes: true, context: true, contours: false, thumbs: true, plan: false, site: true, landmarks: true, survey: true }, hiddenCats: [] },
+  settings: { mode: 'field', observer: '', basemap: 'sat', heritageMode: 'status', planOpacity: 0.55,
+    layers: { heritage: true, heritageLabels: true, heritagePts: true, buildings: true, streets: true, places: true, axes: true, context: true, contours: false, thumbs: true, plan: false, site: true, landmarks: true, survey: true }, hiddenCats: [] },
   selected: null,
   me: null,              // last GPS fix {lat,lng,acc,heading}
   urls: new Map(),       // photo id -> object URL cache
@@ -226,7 +226,7 @@ const isHeritageId = id => /^H/.test(id);
 function lazyLabel(layer, text, opts, minZ) { layer._lz = { text, opts: { permanent: true, interactive: false, ...opts }, minZ }; }
 function syncLabels() {
   const z = map.getZoom();
-  for (const g of [L_.heritage, L_.buildings, L_.streets, L_.landmarks, L_.survey, L_.places, L_.axes]) if (g) g.eachLayer(l => {
+  for (const g of [L_.heritage, L_.buildings, L_.streets, L_.landmarks, L_.survey, L_.places, L_.axes, L_.hpts]) if (g) g.eachLayer(l => {
     const s = l._lz;
     if (!s) { return; }
     const want = z >= s.minZ;
@@ -241,7 +241,8 @@ const FLOOR_RAMP = [[1, '#fde7d1'], [2, '#fbc9a0'], [3, '#f7a571'], [4, '#ef8250
 const floorColor = f => f ? FLOOR_RAMP.find(([k]) => f <= k)[1] : null;
 const floorsOf = id => +(S.heritage.get(id)?.floors) || S.geoIndex?.get(id)?.properties.floors || null;
 function heritageStyle(hid) {
-  const rec = S.heritage.get(hid);
+  const own = S.heritage.get(hid), fr = S.heritage.get(hpOfMember.get(hid));
+  const rec = own || fr;
   const mode = S.settings.heritageMode;
   let fill = '#9c3d16', stroke = '#2a0f04', w = 1.3;
   if (mode === 'status') {
@@ -348,6 +349,7 @@ function setBuildingLabel(lyr, id) {
 }
 // cheap refresh after editing one building (no full rebuild of 1000 layers)
 function refreshBuilding(id) {
+  if (hpById.has(id)) { renderHeritagePoints(); const m = hpById.get(id).properties.members; m.forEach(restyle); return; }
   const l = geoLayers.get(id); if (!l) return;
   restyle(id); setBuildingLabel(l, id); syncLabels(); renderThumbs();
 }
@@ -368,7 +370,7 @@ async function renderThumbs() {
   const run = ++thumbRun;
   const items = [];
   for (const r of S.heritage.values()) {
-    if (!(r.photos || []).length) continue;
+    if (!(r.photos || []).length || isHP(r.id)) continue;   // field points draw their own photo marker
     const f = buildingFeature(r.id); if (!f) continue;
     items.push({ ll: labelPoint(f), photo: r.photos[0], n: r.photos.length, open: () => openBuilding(r.id) });
   }
@@ -437,8 +439,14 @@ function updateLabelVisibility() {
 map.on('zoomend', updateLabelVisibility);
 
 function applyLayerVisibility() {
-  const ly = S.settings.layers;
+  const ly = S.settings.layers, A = S.settings.mode === 'analysis';
   const tog = (lyr, on) => { if (!lyr) return; if (on && !map.hasLayer(lyr)) map.addLayer(lyr); if (!on && map.hasLayer(lyr)) map.removeLayer(lyr); };
+  // field mode = basemap + approximate heritage points + what the team draws/photographs; everything else is analysis
+  tog(L_.hpts, !A && ly.heritagePts); tog(L_.survey, ly.survey); tog(L_.thumbs, ly.thumbs);
+  if (!A) {
+    for (const k of ['buildings', 'heritage', 'plan', 'site', 'streets', 'places', 'axes', 'context', 'contours', 'landmarks']) tog(L_[k], false);
+    updateLabelVisibility(); return;
+  }
   tog(L_.buildings, ly.buildings); tog(L_.heritage, ly.heritage); tog(L_.plan, ly.plan); tog(L_.site, ly.site);
   tog(L_.streets, ly.streets); tog(L_.places, ly.places && !!S.places); tog(L_.axes, ly.axes); tog(L_.context, ly.context); tog(L_.contours, ly.contours); tog(L_.landmarks, ly.landmarks); tog(L_.survey, ly.survey); tog(L_.thumbs, ly.thumbs);
   updateLabelVisibility();
@@ -446,11 +454,12 @@ function applyLayerVisibility() {
 
 async function loadStatic() {
   const get = u => fetch(`${u}?v=${DATA_VERSION}`).then(r => { if (!r.ok) throw new Error(u); return r.json(); });
-  const [her, bld, corners, site, lm, st, cadB, cadC, pl] = await Promise.all([
-    get('data/heritage.json'), get('data/buildings.json'), get('data/plan_corners.json'), get('data/site.json'), get('data/landmarks.json'), get('data/streets.json').catch(() => null), get('data/context_buildings.json').catch(() => null), get('data/cad_contours.json').catch(() => null), get('data/places.json').catch(() => null),
+  const [her, bld, corners, site, lm, st, cadB, cadC, pl, hp] = await Promise.all([
+    get('data/heritage.json'), get('data/buildings.json'), get('data/plan_corners.json'), get('data/site.json'), get('data/landmarks.json'), get('data/streets.json').catch(() => null), get('data/context_buildings.json').catch(() => null), get('data/cad_contours.json').catch(() => null), get('data/places.json').catch(() => null), get('data/heritage_points.json').catch(() => null),
   ]);
   S.heritageGeo = her; S.buildingsGeo = bld; S.planCorners = corners; S.streetsGeo = st; S.siteGeo = site;
   if (pl) { S.places = pl.places; S.links = { axes: pl.axes, triangle: pl.triangle }; }
+  for (const f of hp?.features || []) { hpById.set(f.properties.id, f); f.properties.members.forEach(m => hpOfMember.set(m, f.properties.id)); }
   // surrounding city from the CAD (CADMapper/OSM) export, coloured by height
   if (cadB) L.geoJSON(cadB, {
     style: f => ({ renderer: ctxRenderer, color: '#3b2a1e', weight: .6, fillColor: floorColor(f.properties.floors) || '#ccc', fillOpacity: .55 }),
@@ -505,17 +514,24 @@ async function compressImage(file, max, q) {
   const w = src.width, h = src.height, k = Math.min(1, max / Math.max(w, h));
   const c = document.createElement('canvas'); c.width = Math.round(w * k); c.height = Math.round(h * k);
   c.getContext('2d').drawImage(src, 0, 0, c.width, c.height);
-  return new Promise(res => c.toBlob(res, 'image/jpeg', q));
+  return new Promise(res => c.toBlob(res, PHOTO_TYPE, q));
 }
+// WebP is ~30% smaller than JPEG at the same quality; Safari versions without WebP encoding fall back to JPEG
+const PHOTO_TYPE = (() => { try { const c = document.createElement('canvas'); c.width = c.height = 1; return c.toDataURL('image/webp').startsWith('data:image/webp') ? 'image/webp' : 'image/jpeg'; } catch { return 'image/jpeg'; } })();
+const photoExt = t => (t === 'image/webp' ? 'webp' : 'jpg');
 async function addPhotos(files) {
-  const ids = [];
-  for (const file of files) {
-    if (!file.type.startsWith('image/')) continue;
-    const [blob, thumb] = await Promise.all([compressImage(file, 1800, .82), compressImage(file, 360, .7)]);
-    const id = uid('P');
-    await DB.put('photos', { id, blob, thumb, created: nowIso(), lat: S.me?.lat ?? null, lng: S.me?.lng ?? null, observer: S.settings.observer });
-    ids.push(id);
+  const ids = [], imgs = [...files].filter(f => f.type.startsWith('image/') || /\.(jpe?g|png|webp|heic)$/i.test(f.name));
+  // one at a time: phones run out of memory decoding many full-size camera photos in parallel
+  for (const [i, file] of imgs.entries()) {
+    if (imgs.length > 1) toast(`جاري حفظ الصور ${i + 1} / ${imgs.length}…`, 60000);
+    try {
+      const blob = await compressImage(file, 1600, .78), thumb = await compressImage(file, 320, .62);
+      const id = uid('P');
+      await DB.put('photos', { id, blob, thumb, created: nowIso(), lat: S.me?.lat ?? null, lng: S.me?.lng ?? null, observer: S.settings.observer, name: file.name });
+      ids.push(id);
+    } catch (e) { console.error(e); toast(`تعذّرت قراءة ${file.name}`); }
   }
+  if (navigator.storage?.persist) navigator.storage.persist().catch(() => {});
   return ids;
 }
 async function photoUrl(id, thumb = true) {
@@ -563,7 +579,7 @@ function galStep(d) { GAL.i = (GAL.i + d + GAL.ids.length) % GAL.ids.length; sho
   lb.addEventListener('click', e => {
     if (e.target.closest('.lb-prev')) return galStep(1);      // RTL: the right-hand arrow goes back
     if (e.target.closest('.lb-next')) return galStep(-1);
-    if (e.target.closest('.lb-dl')) { const a = document.createElement('a'); a.href = $('img', lb).src; a.download = GAL.ids[GAL.i] + '.jpg'; a.click(); return; }
+    if (e.target.closest('.lb-dl')) { const a = document.createElement('a'); a.href = $('img', lb).src; a.download = GAL.ids[GAL.i] + '.' + photoExt(PHOTO_TYPE); a.click(); return; }
     if (e.target.tagName !== 'IMG') lb.hidden = true;
   });
   let x0 = null;
@@ -643,9 +659,15 @@ const PANELS = {
 
   layers() {
     const ly = S.settings.layers;
-    openSheet('الطبقات', `
+    const field = S.settings.mode !== 'analysis';
+    openSheet(field ? 'الطبقات — وضع الميدان' : 'الطبقات — وضع التحليل', `
       <h3>الخريطة الأساسية</h3>
       <div class="basemaps">${Object.entries(BASEMAPS).map(([k, b]) => `<button data-bm="${k}" class="${S.settings.basemap === k ? 'on' : ''}">${b.name}</button>`).join('')}</div>
+      ${field ? `<h3>طبقات الميدان</h3>
+      ${swHtml('heritagePts', 'مواقع مباني الحفاظ (تقريبية)', `${hpById.size} موقع — بدون حدود، ترسمونها بالموقع`, ly.heritagePts, 'background:#9c3d16;border-radius:50%')}
+      ${swHtml('survey', 'رسمنا ورصدنا', `${S.features.size} عنصر`, ly.survey, 'background:#e67e22')}
+      ${swHtml('thumbs', 'الصور على الخريطة', '', ly.thumbs, 'background:#ccc;border-radius:50%')}
+      <p class="muted">باقي الطبقات (المباني، الشوارع، الأماكن، المثلث…) بـ <b>وضع التحليل</b> من الزر فوق.</p>` : `
       <h3>طبقات السايت</h3>
       ${swHtml('heritage', 'مباني الحفاظ', `${S.heritageGeo?.features.length || 0} مبنى — مطابقة على بصمات المباني الحقيقية`, ly.heritage, 'background:#9c3d16')}
       ${swHtml('heritageLabels', 'أرقام مباني الحفاظ', 'تظهر عند التقريب الكبير', ly.heritageLabels)}
@@ -665,7 +687,7 @@ const PANELS = {
       ${chipsHtml('hmode', [['status', 'موثّق / غير موثّق'], ['condition', 'حسب الحالة الإنشائية'], ['height', 'حسب الارتفاع (طوابق)'], ['plain', 'لون واحد']], S.settings.heritageMode)}
       <div class="legend" id="hLegend"></div>
       <h3>إظهار فئات الرصد</h3>
-      ${['point', 'line', 'polygon'].map(k => chipsHtml('cats-' + k, CATS[k].map(c => [k + ':' + c[0], c[1], c[2]]), CATS[k].map(c => k + ':' + c[0]).filter(x => !S.settings.hiddenCats.includes(x)), true)).join('<div style="height:6px"></div>')}
+      ${['point', 'line', 'polygon'].map(k => chipsHtml('cats-' + k, CATS[k].map(c => [k + ':' + c[0], c[1], c[2]]), CATS[k].map(c => k + ':' + c[0]).filter(x => !S.settings.hiddenCats.includes(x)), true)).join('<div style="height:6px"></div>')}`}
     `, body => {
       wireChips(body);
       const legend = () => {
@@ -732,7 +754,7 @@ const PANELS = {
       $('#lsort', body).onclick = e => { const b = e.target.closest('.chip'); if (!b) return; mode = b.dataset.v; $$('#lsort .chip', body).forEach(x => x.classList.toggle('on', x === b)); draw(); };
       $('#lres', body).onclick = e => {
         const k = e.target.closest('[data-open]')?.dataset.open; if (!k) return;
-        if (S.geoIndex.has(k)) { flyToBuilding(k); openBuilding(k); }
+        if (S.geoIndex.has(k) || isHP(k)) { flyToBuilding(k); openRecord(k); }
         else { flyToFeature(k); openFeature(k); }
       };
       draw();
@@ -753,6 +775,8 @@ const PANELS = {
         <button class="btn" id="exCsv">CSV (لـ Excel)</button>
       </div>
       <div class="row" style="margin-top:8px"><button class="btn" id="imp">استيراد ملف ZIP / GeoJSON</button></div>
+      <h3>التخزين على هذا الجهاز</h3>
+      <p class="muted" id="storageInfo">جاري الحساب…</p>
       <h3>العمل بدون انترنت</h3>
       <p class="muted">نزّل صور القمر الصناعي للسايت قبل لا تطلعون، حتى الخريطة تشتغل حتى لو النت ضعيف.</p>
       <button class="btn block" id="offline">تنزيل خريطة السايت للاستخدام بدون نت</button>
@@ -775,6 +799,7 @@ const PANELS = {
       $('#offline', body).onclick = e => downloadOffline(e.target);
       $('#calib', body).onclick = () => { closeSheet(); openCalibration(); };
       $('#wipe', body).onclick = wipeAll;
+      storageInfo($('#storageInfo', body));
       $('.chips[data-name="theme"]', body).addEventListener('change', () => { S.settings.theme = chipVal(body, 'theme') || 'auto'; applyTheme(); saveSettings(); });
     });
   },
@@ -791,6 +816,7 @@ function featureCenter(f) {
   const c = turf.centroid(f).geometry.coordinates; return [c[1], c[0]];
 }
 function buildingFeature(id) {
+  if (hpById.has(id)) return hpById.get(id);
   const f = S.geoIndex?.get(id);
   return f && { type: 'Feature', properties: f.properties, geometry: calibGeo(f.geometry) };
 }
@@ -818,6 +844,9 @@ function listItems() {
   return out;
 }
 function todoHeritage() {
+  if (hpById.size) return [...hpById.values()].filter(f => !S.heritage.get(f.properties.id)?.visited).map(f => ({
+    key: f.properties.id, title: f.properties.name || `مبنى حفاظ ${f.properties.id}`, sub: `موقع تقريبي · ≈ ${fmtArea(f.properties.area_m2)}`,
+    search: '', color: '#9c3d16', dist: distTo([f.geometry.coordinates[1], f.geometry.coordinates[0]]) }));
   return S.heritageGeo.features.filter(f => !S.heritage.get(f.properties.id)?.visited).map(f => {
     const hf = buildingFeature(f.properties.id);
     return { key: f.properties.id, title: `مبنى حفاظ ${f.properties.id}`, sub: `${fmtArea(f.properties.area_m2)}${f.properties.courtyard ? ' · بيه حوش' : ''}`,
@@ -832,6 +861,7 @@ function flyToFeature(id) {
 }
 function flyToBuilding(hid) {
   const f = buildingFeature(hid); if (!f) return;
+  if (f.geometry.type === 'Point') return map.flyTo([f.geometry.coordinates[1], f.geometry.coordinates[0]], Math.max(map.getZoom(), 19));
   map.flyToBounds(L.geoJSON(f).getBounds(), { maxZoom: 20, padding: [60, 60] });
 }
 
@@ -961,7 +991,7 @@ function editShape(id) {
 }
 
 // ---------------------------------------------------------------- building records (heritage + every other footprint)
-const buildingTitle = (id, rec) => rec?.name || S.geoIndex?.get(id)?.properties.name || (isHeritageId(id) ? `مبنى حفاظ ${id}` : `مبنى ${id}`);
+const buildingTitle = (id, rec) => rec?.name || (hpById.get(id) || S.geoIndex?.get(id))?.properties.name || (isHeritageId(id) ? `مبنى حفاظ ${id}` : `مبنى ${id}`);
 const OSM_KIND_AR = { school: 'مدرسة', place_of_worship: 'دار عبادة', archaeological_site: 'موقع أثري', bank: 'مصرف', exhibition_centre: 'معارض / غرفة تجارة',
   memorial: 'معلم تذكاري', sports: 'رياضي', building: 'مبنى', yes: 'مبنى', library: 'مكتبة', cafe: 'مقهى', restaurant: 'مطعم', marketplace: 'سوق' };
 // rows of the always-known (computed) details every building has
@@ -1013,7 +1043,8 @@ function openBuilding(id) {
     S.me && ['يبعد عني', fmtLen(distTo(c))],
     rec.visitedAt && ['وثّقه', `${esc(rec.visitedBy || '—')} · ${fmtDate(rec.visitedAt)}`],
   ].filter(Boolean);
-  const photos = rec.photos || [];
+  const hpId = hpOfMember.get(id), fieldRec = hpId && S.heritage.get(hpId);
+  const photos = [...new Set([...(rec.photos || []), ...(fieldRec?.photos || [])])];
   openSheet(buildingTitle(id, rec), `
     <div class="hero" id="hero">${photos.length ? '' : `<div class="hero-empty"><svg viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg><span>ماكو صور لهذا المبنى بعد</span></div>`}</div>
     <div class="row" style="margin:10px 0 4px">
@@ -1022,6 +1053,7 @@ function openBuilding(id) {
     </div>
     <h3>${her ? 'مبنى حفاظ — ' : ''}<span dir="ltr">${id}</span></h3>
     ${placeOf(base) ? `<button class="btn block" id="bPlace" style="margin-bottom:10px">📖 تاريخ المكان وعلاقته بالسايت</button>` : ''}
+    ${hpId ? `<button class="btn block" id="bField" style="margin-bottom:10px">🛰 توثيق الميدان لهذا الموقع (${hpId})${fieldRec?.photos?.length ? ` · ${fieldRec.photos.length} صورة` : ''}</button>` : ''}
     <dl class="kv">${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>
     ${rec.notes ? `<h3>ملاحظات</h3><p style="white-space:pre-wrap;margin:0;font-size:14px;line-height:1.7">${esc(rec.notes)}</p>` : ''}
     <div class="row" style="margin-top:14px">
@@ -1033,6 +1065,7 @@ function openBuilding(id) {
     $('#bGal', body).onclick = async () => { if (await addPhotosTo(id, false)) openBuilding(id); };
     $('#bEdit', body).onclick = () => editBuilding(id);
     const bp = $('#bPlace', body); if (bp) bp.onclick = () => openPlace(placeOf(base).name);
+    const bf = $('#bField', body); if (bf) bf.onclick = () => { setAppMode('field'); flyToBuilding(hpId); openHeritagePoint(hpId); };
     return () => select(null);
   });
   ensureVisible(labelPoint(f));
@@ -1055,14 +1088,14 @@ function editBuilding(id) {
     const add = async cap => { const files = await pickPhotos(cap); if (!files.length) return; toast('جاري حفظ الصور…'); photos.push(...await addPhotos(files)); if (!rec.visited) { rec.visited = true; sw.classList.add('on'); } redraw(); };
     $('#cam', body).onclick = () => add(true);
     $('#gal', body).onclick = () => add(false);
-    $('#cancel', body).onclick = () => openBuilding(id);
+    $('#cancel', body).onclick = () => openRecord(id);
     $('#save', body).onclick = async () => {
       const v = readForm(body, 'point'); delete v.category;
       const was = S.heritage.get(id)?.visited;
       Object.assign(rec, v, { photos });
       if (!rec.visited && isDocumented(rec)) rec.visited = true;
       if (rec.visited && !was) { rec.visitedAt = nowIso(); rec.visitedBy = S.settings.observer; }
-      await putHeritage(rec); refreshBuilding(id); toast('انحفظ ✓'); openBuilding(id);
+      await putHeritage(rec); refreshBuilding(id); toast('انحفظ ✓'); openRecord(id);
     };
     return () => select(null);
   });
@@ -1210,10 +1243,106 @@ function linksHtml() {
       <div class="meta"><b>${esc(p.name)}</b><small>${placeCat(p.category)[0]}${p.era ? ' · ' + esc(p.era) : ''}</small></div><span class="dist">${Math.round(p.walk_min)} د</span></div>`).join('')}`;
 }
 
+
+// ---------------------------------------------------------------- field mode: approximate heritage points (no boundaries)
+// Each point stands for a group of heritage cells of the plan (`members`); records saved on a point
+// show up in analysis mode on those cells, and boundaries drawn on site become survey polygons.
+L_.hpts = L.featureGroup();
+const hpById = new Map(), hpOfMember = new Map();
+const isHP = id => hpById.has(id);
+const hpRec = id => S.heritage.get(id) || { id, photos: [] };
+
+function renderHeritagePoints() {
+  L_.hpts.clearLayers();
+  for (const [id, f] of hpById) {
+    const rec = S.heritage.get(id), ph = rec?.photos?.[0], [lng, lat] = f.geometry.coordinates;
+    const cls = `hp-pin${rec?.visited ? ' visited' : ''}${rec?.boundary ? ' drawn' : ''}`;
+    const html = ph ? `<div class="thumb-pin hp-photo${rec?.visited ? ' visited' : ''}" data-ph="${ph}">${rec.photos.length > 1 ? `<b>${rec.photos.length}</b>` : ''}</div>`
+      : `<div class="${cls}"><span>${id.slice(2)}</span></div>`;
+    const m = L.marker([lat, lng], { pane: 'thumbPane', icon: L.divIcon({ className: '', html, iconSize: ph ? [38, 38] : [28, 28], iconAnchor: ph ? [19, 19] : [14, 14] }) });
+    if (ph) m.on('add', async () => { const el = m.getElement()?.querySelector('[data-ph]'); if (el) el.style.backgroundImage = `url(${await photoUrl(ph)})`; });
+    const nm = rec?.name || f.properties.name;
+    if (nm) lazyLabel(m, esc(nm), { direction: 'top', offset: [0, -16], className: 'lbl lbl-name' }, 17);
+    m.on('click', e => { L.DomEvent.stopPropagation(e); openHeritagePoint(id); });
+    L_.hpts.addLayer(m);
+  }
+  syncLabels();
+}
+
+function openRecord(id) { if (isHP(id)) openHeritagePoint(id); else openBuilding(id); }
+
+function openHeritagePoint(id) {
+  const f = hpById.get(id); if (!f) return;
+  const rec = hpRec(id), p = f.properties, [lng, lat] = f.geometry.coordinates;
+  const cond = condOf(rec.condition);
+  const bnd = rec.boundary && S.features.get(rec.boundary);
+  const rows = [
+    ['النوع', '<span class="badge"><span class="dot" style="background:#9c3d16"></span>مبنى حفاظ — موقع تقريبي</span>'],
+    p.name && ['معروف باسم', esc(p.name)],
+    cond && ['الحالة', `<span class="badge"><span class="dot" style="background:${cond[2]}"></span>${cond[1]}</span>`],
+    rec.floors && ['الطوابق', esc(rec.floors)], rec.era && ['الحقبة', esc(rec.era)], rec.use && ['الاستعمال الحالي', esc(rec.use)],
+    ['الحدود', bnd ? `مرسومة ✓ · ${fmtArea(turf.area(bnd))}` : 'بعد ما انرسمت — ارسمها بالموقع'],
+    ['حسب المخطط', `≈ ${fmtArea(p.area_m2)}${p.courtyard ? ' · بيه حوش' : ''} · ${p.members.length} وحدة`],
+    S.me && ['يبعد عني', fmtLen(distTo([lat, lng]))],
+    rec.visitedAt && ['وثّقه', `${esc(rec.visitedBy || '—')} · ${fmtDate(rec.visitedAt)}`],
+  ].filter(Boolean);
+  openSheet(buildingTitle(id, rec), `
+    <div class="hero" id="hero">${(rec.photos || []).length ? '' : `<div class="hero-empty"><svg viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg><span>ماكو صور بعد — صوّروا المبنى من أكثر من زاوية</span></div>`}</div>
+    <div class="row" style="margin:10px 0 4px">
+      <button class="btn primary" id="hCam">📷 صوّر</button>
+      <button class="btn" id="hGal">🖼 صور كثيرة من المعرض</button>
+    </div>
+    <div class="row" style="margin:8px 0 4px">
+      <button class="btn${bnd ? '' : ' primary'}" id="hDraw">${bnd ? '✏️ عدّل الحدود' : '✏️ ارسم حدود المبنى'}</button>
+      <button class="btn" id="hEdit">📝 ${isDocumented(rec) ? 'تعديل التوثيق' : 'وثّق المبنى'}</button>
+    </div>
+    <h3>مبنى حفاظ <span dir="ltr">${id}</span></h3>
+    <dl class="kv">${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>
+    ${rec.notes ? `<h3>ملاحظات</h3><p style="white-space:pre-wrap;margin:0;font-size:14px;line-height:1.7">${esc(rec.notes)}</p>` : ''}
+    <div class="row" style="margin-top:14px">
+      <button class="btn" id="hAna">📊 شوفه بوضع التحليل</button>
+      <a class="btn" href="https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=walking" target="_blank" rel="noopener">اتجاهات</a>
+    </div>
+    <p class="muted" style="margin-top:10px">الموقع تقريبي من مخطط الحفاظ. المبنى الحقيقي يتحدد بالموقع — ارسم حدوده بعد ما تتأكد منه.</p>`, body => {
+    renderHero($('#hero', body), rec.photos || [], id);
+    $('#hCam', body).onclick = async () => { if (await addPhotosTo(id, true)) openHeritagePoint(id); };
+    $('#hGal', body).onclick = async () => { if (await addPhotosTo(id, false)) openHeritagePoint(id); };
+    $('#hEdit', body).onclick = () => editBuilding(id);
+    $('#hDraw', body).onclick = () => { closeSheet(); if (bnd) editShape(bnd.properties.id); else drawHeritageBoundary(id); };
+    $('#hAna', body).onclick = () => { closeSheet(); setAppMode('analysis'); const b = p.members.map(m => buildingFeature(m)).filter(Boolean); if (b.length) map.flyToBounds(L.geoJSON({ type: 'FeatureCollection', features: b }).getBounds(), { maxZoom: 19, padding: [60, 60] }); };
+  });
+}
+
+function drawHeritageBoundary(id) {
+  const [lng, lat] = hpById.get(id).geometry.coordinates;
+  map.flyTo([lat, lng], Math.max(map.getZoom(), 19));
+  startDraw('Polygon', async geometry => {
+    const rec = hpRec(id);
+    const f = { type: 'Feature', geometry, properties: { id: uid('F'), kind: 'polygon', category: 'heritage', name: buildingTitle(id, rec), heritageId: id,
+      photos: [], created: nowIso(), observer: S.settings.observer, notes: '' } };
+    await putFeature(f);
+    rec.boundary = f.properties.id;
+    if (!rec.visited) { rec.visited = true; rec.visitedAt = nowIso(); rec.visitedBy = S.settings.observer; }
+    await putHeritage(rec);
+    renderSurvey(); renderHeritagePoints(); toast('انحفظت حدود المبنى ✓'); openHeritagePoint(id);
+  });
+}
+
+// ---------------------------------------------------------------- modes: field (clean) / analysis (all layers)
+function setAppMode(mode) {
+  S.settings.mode = mode; saveSettings();
+  document.body.dataset.mode = mode;
+  $$('.modes button').forEach(b => b.classList.toggle('on', b.dataset.mode === mode));
+  applyLayerVisibility();
+  toast(mode === 'field' ? 'وضع الميدان: خريطة نظيفة + مواقع الحفاظ التقريبية + رسمكم' : 'وضع التحليل: كل الطبقات المرجعية', 2200);
+}
+$$('.modes button').forEach(b => b.onclick = () => { closeSheet(); setAppMode(b.dataset.mode); });
+
 // ---------------------------------------------------------------- analysis
 function analysisHtml() {
-  const H = S.heritageGeo.features, total = H.length;
-  const visited = H.filter(f => S.heritage.get(f.properties.id)?.visited).length;
+  const H = S.heritageGeo.features;
+  const total = hpById.size || H.length;
+  const visited = hpById.size ? [...hpById.keys()].filter(k => S.heritage.get(k)?.visited).length : H.filter(f => S.heritage.get(f.properties.id)?.visited).length;
   const otherDoc = [...S.heritage.values()].filter(r => !isHeritageId(r.id) && isDocumented(r)).length;
   const hArea = H.reduce((a, f) => a + f.properties.area_m2, 0);
   const court = H.filter(f => f.properties.courtyard).length;
@@ -1316,7 +1445,7 @@ async function quickPhoto() {
 
 let drawHandler = null;
 function stopDraw() { map.pm.disableDraw(); if (drawHandler) map.off('pm:create', drawHandler); drawHandler = null; clearMode(); }
-function startDraw(shape) {
+function startDraw(shape, onDone) {
   if (measuring) stopMeasure();
   stopDraw();
   const help = shape === 'Line' ? 'دوس على الخريطة نقطة بنقطة على طول الدرب، وآخر نقطة دوس عليها مرتين' : 'دوس على زوايا المبنى، وارجع للنقطة الأولى حتى تسكّر الشكل';
@@ -1328,6 +1457,7 @@ function startDraw(shape) {
   ]);
   drawHandler = e => {
     const gj = e.layer.toGeoJSON(); map.removeLayer(e.layer); stopDraw();
+    if (onDone) return onDone(gj.geometry);
     editFeature(gj.geometry, shape === 'Line' ? 'line' : 'polygon');
   };
   map.on('pm:create', drawHandler);
@@ -1511,9 +1641,9 @@ async function exportZip(share) {
   zip.file('calibration.json', JSON.stringify(S.calib));
   zip.file('survey.csv', '﻿' + csvText());
   const ids = new Set([...feats.flatMap(f => f.properties.photos || []), ...heritageRecs.flatMap(r => r.photos || [])]);
-  for (const id of ids) { const p = await DB.get('photos', id); if (p) zip.file(`photos/${id}.jpg`, p.blob); }
+  for (const id of ids) { const p = await DB.get('photos', id); if (p) zip.file(`photos/${id}.${photoExt(p.blob.type)}`, p.blob); }
   zip.file('photos_meta.json', JSON.stringify(await Promise.all([...ids].map(async id => { const p = await DB.get('photos', id); return p && { id, created: p.created, lat: p.lat, lng: p.lng, observer: p.observer }; }))));
-  const blob = await zip.generateAsync({ type: 'blob' });
+  const blob = await zip.generateAsync({ type: 'blob' }, m => toast(`تجهيز الملف ${Math.round(m.percent)}% (${ids.size} صورة)`, 60000));
   const name = `site-survey_${who()}_${stamp()}.zip`;
   if (share && navigator.canShare) {
     const file = new File([blob], name, { type: 'application/zip' });
@@ -1556,12 +1686,12 @@ function importFile() {
           const zip = await JSZip.loadAsync(file);
           const meta = zip.file('photos_meta.json') ? JSON.parse(await zip.file('photos_meta.json').async('string')) : [];
           for (const entry of Object.values(zip.files)) {
-            const m = entry.name.match(/^photos\/(.+)\.jpg$/); if (!m) continue;
+            const m = entry.name.match(/^photos\/(.+)\.(jpg|webp)$/); if (!m) continue;
             if (await DB.get('photos', m[1])) continue;
             const blob = await entry.async('blob');
-            const thumb = await compressImage(new File([blob], 'x.jpg', { type: 'image/jpeg' }), 360, .7);
+            const thumb = await compressImage(new File([blob], 'x.' + m[2], { type: m[2] === 'webp' ? 'image/webp' : 'image/jpeg' }), 320, .62);
             const pm = meta.find(x => x && x.id === m[1]) || {};
-            await DB.put('photos', { id: m[1], blob: new Blob([blob], { type: 'image/jpeg' }), thumb, created: pm.created, lat: pm.lat, lng: pm.lng, observer: pm.observer }); nP++;
+            await DB.put('photos', { id: m[1], blob: new Blob([blob], { type: m[2] === 'webp' ? 'image/webp' : 'image/jpeg' }), thumb, created: pm.created, lat: pm.lat, lng: pm.lng, observer: pm.observer }); nP++;
           }
           if (zip.file('survey.geojson')) nF += await mergeFeatures(JSON.parse(await zip.file('survey.geojson').async('string')).features);
           if (zip.file('heritage_records.json')) nH += await mergeHeritage(JSON.parse(await zip.file('heritage_records.json').async('string')));
@@ -1606,6 +1736,14 @@ async function mergeHeritage(list) {
   return n;
 }
 
+// photos live in this browser's IndexedDB (no server / database needed); show how much room is used
+async function storageInfo(el) {
+  const n = await DB._tx('photos', 'readonly', st => st.count());
+  const est = await navigator.storage?.estimate?.().catch(() => null);
+  const persisted = await navigator.storage?.persisted?.().catch(() => false);
+  const mb = v => (v / 1048576).toFixed(v > 1048576 * 100 ? 0 : 1) + ' MB';
+  el.innerHTML = `${n} صورة محفوظة${est ? ` · مستخدم ${mb(est.usage)} من ${mb(est.quota)} متاحة` : ''}<br>${persisted ? '✓ التخزين ثابت — المتصفح ما يمسح الصور تلقائياً' : '⚠ التخزين مو ثابت بعد — صدّروا نسخة ZIP بنهاية كل يوم'}<br>الصور تنحفظ على التلفون نفسه (بدون أي قاعدة بيانات أو اشتراك) وتنتقل للفريق بملف ZIP.`;
+}
 async function wipeAll() {
   if (!confirm('راح ينمسح كل الرصد والصور من هذا الجهاز نهائياً. صدّرت نسخة قبل؟')) return;
   if (prompt('اكتب «امسح» للتأكيد') !== 'امسح') return;
@@ -1641,7 +1779,7 @@ async function doSearch(q, remote) {
   const box = $('#searchResults');
   if (q.length < 2) { box.hidden = true; return; }
   const local = [
-    ...listItems().filter(it => (it.title + ' ' + it.search).includes(q)).map(it => ({ label: it.title, sub: 'من رصدنا', go: () => { if (S.geoIndex.has(it.key)) { flyToBuilding(it.key); openBuilding(it.key); } else { flyToFeature(it.key); openFeature(it.key); } } })),
+    ...listItems().filter(it => (it.title + ' ' + it.search).includes(q)).map(it => ({ key: it.key, label: it.title, sub: isHP(it.key) ? 'توثيق الميدان' : 'من رصدنا', go: () => { if (S.geoIndex.has(it.key) || isHP(it.key)) { flyToBuilding(it.key); openRecord(it.key); } else { flyToFeature(it.key); openFeature(it.key); } } })),
   ];
   L_.landmarks.eachLayer(g => (g.eachLayer ? g.eachLayer(l => {
     const f = l.feature; if (f && (f.properties.name.includes(q) || (f.properties.name_en || '').toLowerCase().includes(q.toLowerCase())))
@@ -1649,7 +1787,12 @@ async function doSearch(q, remote) {
   }) : null));
   for (const [id, f] of S.geoIndex || []) {
     const n = f.properties.name;
-    if (n && n.includes(q) && !local.some(x => x.label === n)) local.unshift({ label: n, sub: isHeritageId(id) ? `مبنى حفاظ ${id}` : `مبنى ${id}`, go: () => { flyToBuilding(id); openBuilding(id); } });
+    if (!n || !n.includes(q)) continue;
+    // in field mode a heritage cell is found through its approximate point
+    const hid = S.settings.mode !== 'analysis' && hpOfMember.get(id);
+    if (hid) { if (!local.some(x => x.key === hid)) local.unshift({ key: hid, label: n, sub: `مبنى حفاظ — موقع تقريبي ${hid}`, go: () => { flyToBuilding(hid); openHeritagePoint(hid); } }); continue; }
+    if (!local.some(x => x.key === id)) local.unshift({ key: id, label: n, sub: isHeritageId(id) ? `مبنى حفاظ ${id}` : `مبنى ${id}`,
+      go: () => { if (S.settings.mode !== 'analysis') setAppMode('analysis'); flyToBuilding(id); openBuilding(id); } });
   }
   for (const pl of S.places || []) {
     if (pl.name.includes(q) && !local.some(x => x.label === pl.name)) local.push({ label: pl.name, sub: 'مكان للربط', go: () => { map.flyTo([pl.lat, pl.lon], 18); openPlace(pl.name); } });
@@ -1686,7 +1829,10 @@ $('#btnSite').onclick = () => map.flyTo(SITE_CENTER, SITE_ZOOM);
   applyTheme();
   setBasemap(S.settings.basemap in BASEMAPS ? S.settings.basemap : 'sat');
   try { await loadStatic(); } catch (e) { console.error(e); toast('تعذّر تحميل طبقات السايت'); }
-  renderHeritage(); renderStreets(); renderPlaces(); renderAxes(); renderPlan(); renderSurvey(); applyLayerVisibility();
+  renderHeritage(); renderStreets(); renderPlaces(); renderAxes(); renderHeritagePoints(); renderPlan(); renderSurvey();
+  document.body.dataset.mode = S.settings.mode;
+  $$('.modes button').forEach(b => b.classList.toggle('on', b.dataset.mode === S.settings.mode));
+  applyLayerVisibility();
   if (navigator.storage?.persist) navigator.storage.persist().catch(() => {});
   if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) navigator.serviceWorker.register('sw.js').catch(() => {});
   if (!S.settings.observer) setTimeout(() => toast('من «المزيد» اكتب اسمك حتى يبين على رصدك', 4000), 1200);
