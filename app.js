@@ -3,7 +3,7 @@
 'use strict';
 
 // ---------------------------------------------------------------- constants
-const DATA_VERSION = '26';    // bump when files in data/ change (also in sw.js)
+const DATA_VERSION = '27';    // bump when files in data/ change (also in sw.js)
 const SITE_CENTER = [33.3387, 44.3935];
 const SITE_ZOOM = 17;
 const BAGHDAD_VIEWBOX = '44.20,33.45,44.55,33.20';
@@ -559,7 +559,9 @@ async function photoUrl(id, thumb = true) {
   let b = thumb ? (p.thumb || p.blob) : p.blob;
   // a teammate's photo that is only in the cloud: download once, then it is on this phone too
   if (!b && cloudOn()) { try { b = await cloudPhotoBlob(p, thumb); } catch { b = null; } }
-  if (!b && !thumb) b = p.thumb;
+  // full view while the original is still uploading: show the thumbnail but don't cache it as the full photo,
+  // so the 1600 px version is fetched as soon as it exists
+  if (!b && !thumb) return p.thumb ? URL.createObjectURL(p.thumb) : '';
   if (!b) return '';
   const u = URL.createObjectURL(b); S.urls.set(key, u); return u;
 }
