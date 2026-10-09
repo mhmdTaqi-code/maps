@@ -28,7 +28,7 @@ const DAILY_PHOTOS_PER_DEVICE = 5000;
 const PHOTO_COLS = ['photoId', 'fileId', 'owner', 'created', 'device', 'synced', 'bytes', 'observer', 'lat', 'lng', 'link', 'name', 'thumb', 'previewId'];
 const MAX_THUMB_B64 = 45000;
 
-function doGet() { return out({ ok: true, service: 'site-survey-cloud', version: 4, open: OPEN_ACCESS }); }
+function doGet() { return out({ ok: true, service: 'site-survey-cloud', version: 5, open: OPEN_ACCESS }); }
 
 function doPost(e) {
   let req;
@@ -194,7 +194,7 @@ function getPhoto(req) {
 // ---- records: newest `updated` wins; `synced` (server clock) drives incremental pulls
 function putRecords(req) {
   const sh = book().getSheetByName('records'), rows = columnMap(sh), t = now();
-  let written = 0;
+  let written = 0, hist = null;
   (req.records || []).slice(0, 100).forEach(function (r) {
     if (!r || !r.id) return;
     let json = JSON.stringify(r.data);
@@ -206,6 +206,10 @@ function putRecords(req) {
     if (row) {
       const cur = sh.getRange(row, 3).getValue();
       if (String(cur) >= String(r.updated || '')) return;
+      // keep the version being replaced (edits and deletions can always be undone from «history»)
+      const old = sh.getRange(row, 1, 1, 6).getValues()[0];
+      hist = hist || historySheet();
+      hist.appendRow(old.concat([t, req.device || '']));
       sh.getRange(row, 2, 1, 5).setValues([[r.store, r.updated || '', req.device || '', t, json]]);
     } else {
       sh.appendRow([r.id, r.store, r.updated || '', req.device || '', t, json]);
@@ -215,8 +219,30 @@ function putRecords(req) {
   });
   return { ok: true, written: written, now: t };
 }
+function historySheet() {
+  const ss = book();
+  let h = ss.getSheetByName('history');
+  if (!h) { h = ss.insertSheet('history'); h.appendRow(['id', 'store', 'updated', 'device', 'synced', 'json', 'replacedAt', 'replacedBy']); h.setFrozenRows(1); }
+  return h;
+}
+// one full copy of the records sheet per day, in «نسخ احتياطية» (made by the first sync of the day)
+function backupDaily(ss) {
+  const day = now().slice(0, 10), p = props();
+  if (p.getProperty('BACKUP_DAY') === day) return;
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(2000)) return;
+  try {
+    if (p.getProperty('BACKUP_DAY') === day) return;
+    let dir = null; const id = p.getProperty('BACKUPS');
+    if (id) { try { dir = DriveApp.getFolderById(id); } catch (e) {} }
+    if (!dir) { dir = root().createFolder('نسخ احتياطية (يومية)'); p.setProperty('BACKUPS', dir.getId()); }
+    DriveApp.getFileById(ss.getId()).makeCopy('نسخة ' + day + ' — ' + ss.getName(), dir);
+    p.setProperty('BACKUP_DAY', day);
+  } catch (e) {} finally { lock.releaseLock(); }
+}
 function pull(req) {
   const ss = book(), since = String(req.since || ''), t = now();
+  backupDaily(ss);
   const recSh = ss.getSheetByName('records'), n = recSh.getLastRow(), records = [];
   if (n > 1) recSh.getRange(2, 1, n - 1, 6).getValues().forEach(function (v) {
     if (String(v[4]) <= since) return;

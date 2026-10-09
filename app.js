@@ -3,7 +3,7 @@
 'use strict';
 
 // ---------------------------------------------------------------- constants
-const DATA_VERSION = '31';    // bump when files in data/ change (also in sw.js)
+const DATA_VERSION = '32';    // bump when files in data/ change (also in sw.js)
 const SITE_CENTER = [33.3387, 44.3935];
 const SITE_ZOOM = 17;
 const BAGHDAD_VIEWBOX = '44.20,33.45,44.55,33.20';
@@ -532,6 +532,8 @@ async function compressImage(file, max, q) {
 // WebP is ~30% smaller than JPEG at the same quality; Safari versions without WebP encoding fall back to JPEG
 const PHOTO_TYPE = (() => { try { const c = document.createElement('canvas'); c.width = c.height = 1; return c.toDataURL('image/webp').startsWith('data:image/webp') ? 'image/webp' : 'image/jpeg'; } catch { return 'image/jpeg'; } })();
 const photoExt = t => ({ 'image/webp': 'webp', 'image/png': 'png', 'image/heic': 'heic', 'image/heif': 'heif' }[t] || 'jpg');
+// in-app browsers (Telegram, Instagram, Facebook, Android WebViews) often hand back a small camera photo and weak GPS
+const IN_APP = /FBAN|FBAV|Instagram|Line\/|Telegram|Snapchat|; wv\)/.test(navigator.userAgent);
 // «أصلية» keeps the camera file untouched (up to the cloud's ≈ 35 MB per photo); «مضغوطة» = 1600 px WebP
 const MAX_ORIGINAL = 34 * 1024 * 1024;
 const keepOriginal = () => S.settings.photoQuality !== 'compressed';
@@ -591,12 +593,30 @@ async function renderPhotoGrid(el, ids, onRemove) {
 
 // full-screen gallery: swipe / arrows / keyboard
 const GAL = { ids: [], i: 0 };
+const fmtMB = n => n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.round(n / 1024) + ' KB';
 async function showGal() {
   const lb = $('#lightbox'), id = GAL.ids[GAL.i];
-  $('img', lb).src = await photoUrl(id, false);
+  $('img', lb).src = S.urls.get(id + ':o') || await photoUrl(id, false);
   const p = await DB.get('photos', id);
-  $('.lb-cap', lb).textContent = `${GAL.i + 1} / ${GAL.ids.length}${p?.observer ? ' · ' + p.observer : ''}${p?.created ? ' · ' + fmtDate(p.created) : ''}`;
+  const isOrig = !!(p?.blob && !p.slim && !p.remote) || S.urls.has(id + ':o');
+  const q = isOrig ? `أصلية${p?.blob && !p.slim && !p.remote ? ' ' + fmtMB(p.blob.size) : ''}` : 'معاينة — الأصلية بالـ Drive';
+  $('.lb-cap', lb).textContent = `${GAL.i + 1} / ${GAL.ids.length}${p?.observer ? ' · ' + p.observer : ''}${p?.created ? ' · ' + fmtDate(p.created) : ''} · ${q}`;
+  $('.lb-full', lb).hidden = isOrig || !p?.cloud;
   $('.lb-prev', lb).hidden = $('.lb-next', lb).hidden = GAL.ids.length < 2;
+}
+async function galOriginal(save) {
+  const id = GAL.ids[GAL.i], p = await DB.get('photos', id); if (!p) return;
+  const local = p.blob && !p.slim && !p.remote;
+  if (!local) toast('جاري جلب الصورة الأصلية من الـ Drive…', 120000);
+  let b;
+  try { b = await originalBlob(p); } catch (e) { toast('ما كدرنا نجيب الأصلية: ' + e.message, 5000); return; }
+  if (!b) { toast(p.cloud ? 'الأصلية بعدها ما ارتفعت من تلفون صاحبها' : 'الأصلية بعدها ترتفع من تلفون صاحبها', 4000); return; }
+  if (!local) { toast(`✓ الأصلية ${fmtMB(b.size)}`, 2500); if (!S.urls.has(id + ':o')) S.urls.set(id + ':o', URL.createObjectURL(b)); if (GAL.ids[GAL.i] === id) showGal(); }
+  if (save) {
+    const a = document.createElement('a'); a.href = URL.createObjectURL(b);
+    a.download = p.name && /\.\w{3,4}$/.test(p.name) ? p.name : `${id}.${photoExt(b.type)}`;
+    a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+  }
 }
 function openGallery(ids, i = 0) { GAL.ids = ids; GAL.i = Math.max(0, i); $('#lightbox').hidden = false; showGal(); }
 function galStep(d) { GAL.i = (GAL.i + d + GAL.ids.length) % GAL.ids.length; showGal(); }
@@ -605,7 +625,8 @@ function galStep(d) { GAL.i = (GAL.i + d + GAL.ids.length) % GAL.ids.length; sho
   lb.addEventListener('click', e => {
     if (e.target.closest('.lb-prev')) return galStep(1);      // RTL: the right-hand arrow goes back
     if (e.target.closest('.lb-next')) return galStep(-1);
-    if (e.target.closest('.lb-dl')) { const a = document.createElement('a'); a.href = $('img', lb).src; a.download = GAL.ids[GAL.i] + '.' + photoExt(PHOTO_TYPE); a.click(); return; }
+    if (e.target.closest('.lb-dl')) return galOriginal(true);          // always the original, never the preview
+    if (e.target.closest('.lb-full')) return galOriginal(false);
     if (e.target.tagName !== 'IMG') lb.hidden = true;
   });
   let x0 = null;
@@ -1560,7 +1581,7 @@ async function googleLoc() {
 // sharing needs the app on screen (browsers pause GPS when the screen locks) — so keep the screen awake
 let shareLock = null;
 async function keepAwake() {
-  const want = teamSettings().sharing && document.visibilityState === 'visible';
+  const want = (teamSettings().sharing || watchId != null) && document.visibilityState === 'visible';
   if (want && !shareLock) { try { shareLock = await navigator.wakeLock?.request('screen'); shareLock?.addEventListener('release', () => { shareLock = null; }); } catch {} }
   else if (!want && shareLock) { try { await shareLock.release(); } catch {} shareLock = null; }
 }
@@ -1619,7 +1640,8 @@ async function teamPublish(force) {
   const ts = teamSettings();
   if (!ts.sharing || !S.me || !TEAM.key) return;
   const now = Date.now();
-  if (now - S.me.t > 90000) return;                                          // no precise fix lately: let it go stale honestly
+  if (now - S.me.t > 90000 && KF.weakSince && now - KF.weakSince > 60000) return;   // signal known to be bad: let it go stale honestly
+  if (now - S.me.t > 600000) return;
   const moved = TEAM.lastPos ? map.distance(TEAM.lastPos, [S.me.lat, S.me.lng]) : Infinity;
   if (!force && (now - TEAM.lastSent < 5000 || (moved < 8 && now - TEAM.lastSent < 30000))) return;
   TEAM.lastSent = now; TEAM.lastPos = [S.me.lat, S.me.lng];
@@ -1832,7 +1854,7 @@ async function teamFromLink() {
 // ---------------------------------------------------------------- team cloud: Google Drive via the user's Apps Script
 // Photos are uploaded once (sequentially, resumable), records are pushed when they change and pulled
 // from teammates. Remote photos are fetched on demand through the script and kept on the device.
-const CLOUD = { busy: false, timer: null, debounce: null, state: '', err: '', up: 0, upTotal: 0, lastOk: 0 };
+const CLOUD = { busy: false, timer: null, debounce: null, state: '', err: '', up: 0, upTotal: 0, lastOk: 0, pendPhotos: 0, pendRecs: 0 };
 // the team's Apps Script (cloud/Code.gs, open access): every visitor syncs with it automatically
 const TEAM_CLOUD_URL = 'https://script.google.com/macros/s/AKfycbzabFq7IVXtCGArW3T26G8PnlX5bmAh7XYpk89QOR5iO_bs-wsRCfCAgQZvgE8p8a-0gA/exec';
 const cloudCfg = () => {
@@ -1858,17 +1880,29 @@ async function cloudCall(body, timeoutMs = 60000) {
 }
 const blobToB64 = blob => new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => { const r = fr.result; res(r.slice(r.indexOf(',') + 1)); }; fr.onerror = rej; fr.readAsDataURL(blob); });
 const b64ToBlob = (b, mime) => new Blob([Uint8Array.from(atob(b), c => c.charCodeAt(0))], { type: mime });
+const b64ToBlobBig = (b, mime) => fetch(`data:${mime};base64,${b}`).then(r => r.blob());     // native decode for originals
+async function storageTight() {
+  try { const e = await navigator.storage.estimate(); return e.quota - e.usage < 800 * 1048576 || e.usage / e.quota > .6; } catch { return false; }
+}
+// the photo exactly as the camera took it: from this phone if it still has it, otherwise from Drive
+async function originalBlob(p) {
+  if (p.blob && !p.slim && !p.remote) return p.blob;
+  if (!p.cloud || !cloudOn()) return null;
+  const j = await cloudCall({ action: 'getPhoto', fileId: p.cloud, size: 'full' }, 300000);
+  return b64ToBlobBig(j.data, j.mime || 'image/jpeg');
+}
 function setCloudState(state, err = '') { CLOUD.state = state; CLOUD.err = err; const el = $('#cloudStatus'); if (el) el.innerHTML = cloudStatusHtml(); updateCloudBadge(); }
 function cloudStatusHtml() {
   if (!cloudOn()) return 'غير مفعّلة — الصور تبقى على هذا التلفون بس.';
   const ago = CLOUD.lastOk ? agoTxt(CLOUD.lastOk) : '—';
   const up = CLOUD.upTotal ? ` · رفع الصور ${CLOUD.up}/${CLOUD.upTotal}` : '';
-  return { idle: `✓ متزامن · آخر مزامنة ${ago}`, sync: `⏳ جاري المزامنة${up}`, offline: '📴 بدون نت — راح تتزامن لمن يرجع', error: `⚠ ${esc(CLOUD.err)} — راح يعيد المحاولة` }[CLOUD.state] || `آخر مزامنة ${ago}`;
+  const pend = CLOUD.pendPhotos || CLOUD.pendRecs ? `<br>⚠ بعده على هذا التلفون بس: ${[CLOUD.pendRecs && CLOUD.pendRecs + ' سجل', CLOUD.pendPhotos && CLOUD.pendPhotos + ' صورة'].filter(Boolean).join(' و ')} — خلّي التطبيق مفتوح على النت حتى يرتفع` : (CLOUD.lastOk ? '<br>✓ كل شي بالـ Drive' : '');
+  return ({ idle: `✓ متزامن · آخر مزامنة ${ago}`, sync: `⏳ جاري المزامنة${up}`, offline: '📴 بدون نت — راح تتزامن لمن يرجع', error: `⚠ ${esc(CLOUD.err)} — راح يعيد المحاولة` }[CLOUD.state] || `آخر مزامنة ${ago}`) + pend;
 }
 function updateCloudBadge() {
   const b = document.querySelector('.dock [data-panel="more"]'); if (!b) return;
   b.classList.toggle('cloud-sync', CLOUD.state === 'sync');
-  b.classList.toggle('cloud-err', CLOUD.state === 'error');
+  b.classList.toggle('cloud-err', CLOUD.state === 'error' || ((CLOUD.pendPhotos || CLOUD.pendRecs) > 0 && Date.now() - CLOUD.lastOk > 15 * 60000));
 }
 // which record owns a photo → its Drive sub-folder ("HP20 خان مرجان الاثري")
 function photoOwners() {
@@ -1889,7 +1923,9 @@ async function cloudSync() {
     for (const f of S.features.values()) if ((f.properties.updated || '') > (c.lastPush || '')) recs.push({ id: f.properties.id, store: 'features', updated: f.properties.updated, data: f });
     for (const r of S.heritage.values()) if ((r.updated || '') > (c.lastPush || '')) recs.push({ id: r.id, store: 'heritage', updated: r.updated, data: r });
     for (const d of await DB.all('meta')) if (d.id.startsWith('del:') && (d.updated || '') > (c.lastPush || '')) recs.push({ id: d.id.slice(4), store: 'deleted', updated: d.updated, data: { id: d.id.slice(4) } });
+    CLOUD.pendRecs = recs.length;
     for (let i = 0; i < recs.length; i += 40) await cloudCall({ action: 'putRecords', records: recs.slice(i, i + 40) });
+    CLOUD.pendRecs = 0;
     if (recs.length) { c.lastPush = recs.reduce((a, r) => (r.updated > a ? r.updated : a), c.lastPush || ''); await saveSettings(); }
 
     // 2a) thumbnails first — a few KB each, so teammates see every photo within seconds
@@ -1915,8 +1951,8 @@ async function cloudSync() {
           preview: preview ? await blobToB64(preview) : undefined, thumb: p.thumb ? await blobToB64(p.thumb) : undefined,
           ownerId: owners.get(p.id)?.id || '', ownerName: owners.get(p.id)?.name || '', meta: meta(p) }, 60000 + p.blob.size / 25);   // ≈ 25 KB/s worst case
         p.cloud = j.fileId;
-        // the original is safe in Drive now: keep the light 1600 px copy on the phone so storage doesn't fill up
-        if (preview) { p.blob = preview; p.slim = true; }
+        // the original stays on the phone too; only when the browser's storage runs low is it swapped for the 1600 px copy
+        if (preview && await storageTight()) { p.blob = preview; p.slim = true; }
       } catch (e) {
         if (!navigator.onLine) throw e;
         p.cloudErrs = (p.cloudErrs || 0) + 1; failed++;
@@ -1925,6 +1961,7 @@ async function cloudSync() {
       CLOUD.up++; setCloudState('sync');
     }
     CLOUD.upTotal = 0;
+    CLOUD.pendPhotos = local.filter(p => !p.cloud).length;
 
     // 3) pull teammates' changes (2-minute overlap covers writes that raced the previous pull)
     const since = c.lastPull ? new Date(new Date(c.lastPull).getTime() - 120000).toISOString() : '';
@@ -2134,9 +2171,10 @@ $('#btnMeasure').onclick = startMeasure;
 // fixes confirm it.
 const GPS_MAX_ACC = 30, GPS_Q = 4;          // metres; m/s of expected movement
 let watchId = null, follow = false, meMarker = null, accCircle = null, fixWaiters = [], wakeLock = null, compassOn = false;
-const KF = { lat: 0, lng: 0, v: -1, t: 0, sus: [], lastRaw: 0, weak: 0 };
+const KF = { lat: 0, lng: 0, v: -1, t: 0, sus: [], lastRaw: 0, lastCb: 0, restartAt: 0, weak: 0, weakSince: 0, retries: 0 };
 function waitFix(fn) { fixWaiters.push(fn); }
 function watchGps() {
+  KF.restartAt = Date.now();
   if (watchId != null) navigator.geolocation.clearWatch(watchId);
   watchId = navigator.geolocation.watchPosition(onFix, onGpsErr, { enableHighAccuracy: true, maximumAge: 0, timeout: 30000 });
 }
@@ -2149,6 +2187,7 @@ function startGps() {
   $('#btnGps').classList.add('on');
   gpsChip();
   if (!compassOn) { compassOn = true; startCompass(); }
+  keepAwake();                                 // the screen must not lock by itself while surveying, or GPS pauses
 }
 function stopGps() {
   if (watchId != null) navigator.geolocation.clearWatch(watchId);
@@ -2156,21 +2195,42 @@ function stopGps() {
   Object.assign(KF, { v: -1, sus: [], weak: 0 });
   if (S.settings.gpsOn) { S.settings.gpsOn = false; saveSettings(); }
   $('#btnGps').classList.remove('on', 'follow'); $('#gpsChip').hidden = true;
+  keepAwake();
 }
 function onGpsErr(err) {
-  if (err.code === 1) { toast('لازم تسمح للموقع بالوصول للـ GPS من إعدادات المتصفح', 5000); stopGps(); return; }
-  gpsChip();                                  // timeout / no signal: keep watching, the watchdog restarts it
+  KF.lastCb = Date.now();
+  if (err.code === 1) {
+    // phones sometimes report "denied" for a moment (switching apps, precise-location prompts): if the permission
+    // itself is still there, try again instead of switching GPS off for good
+    const denied = () => { toast('لازم تسمح للموقع بالوصول للـ GPS من إعدادات المتصفح', 6000); stopGps(); };
+    if (KF.retries >= 3 || !navigator.permissions?.query) return denied();
+    navigator.permissions.query({ name: 'geolocation' }).then(st => {
+      if (st.state === 'denied') return denied();
+      KF.retries++; setTimeout(() => { if (watchId != null) watchGps(); }, 3000);
+    }).catch(denied);
+    return;
+  }
+  gpsChip();                                  // timeout / no signal: keep watching
 }
-// some phones silently stop a watch after the app was in the background — restart it when it goes quiet
-setInterval(() => { if (watchId != null && !document.hidden && Date.now() - KF.lastRaw > 25000) { KF.lastRaw = Date.now(); watchGps(); } gpsChip(); }, 10000);
-document.addEventListener('visibilitychange', () => { if (!document.hidden && watchId != null) { KF.lastRaw = Date.now(); watchGps(); } });
+// A watch that has gone completely silent for a minute (some phones drop it after the app was in the background)
+// is restarted — but never while fixes are coming in: restarting resets the GPS and the first fixes are coarse.
+setInterval(() => {
+  if (watchId != null && !document.hidden && Date.now() - KF.lastCb > 60000 && Date.now() - KF.restartAt > 60000) watchGps();
+  gpsChip();
+}, 10000);
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden || watchId == null) return;
+  keepAwake();
+  const back = Date.now();
+  setTimeout(() => { if (watchId != null && KF.lastCb < back) watchGps(); }, 4000);   // nothing since we came back: restart
+});
 
 function onFix(pos) {
   const { latitude: lat, longitude: lng, accuracy: acc } = pos.coords;
   const t = pos.timestamp || Date.now();
-  KF.lastRaw = Date.now();
-  if (!(acc <= GPS_MAX_ACC)) { KF.weak = Math.round(acc); gpsChip(); return; }     // too coarse: keep the last good position
-  KF.weak = 0;
+  KF.lastRaw = KF.lastCb = Date.now();
+  if (!(acc <= GPS_MAX_ACC)) { KF.weak = Math.round(acc); KF.weakSince ||= Date.now(); gpsChip(); return; }   // too coarse: keep the last good position
+  KF.weak = 0; KF.weakSince = 0; KF.retries = 0;
   if (KF.v < 0 || t - KF.t > 120000) Object.assign(KF, { lat, lng, v: acc * acc, t, sus: [] });
   else {
     const dt = Math.max(0, (t - KF.t) / 1000), d = map.distance([KF.lat, KF.lng], [lat, lng]);
@@ -2208,7 +2268,8 @@ function gpsChip() {
   const chip = $('#gpsChip'); if (!chip) return;
   if (watchId == null) { chip.hidden = true; return; }
   chip.hidden = false;
-  const age = S.me ? (Date.now() - S.me.t) / 1000 : Infinity, old = age > 20;
+  const age = S.me ? (Date.now() - S.me.t) / 1000 : Infinity;
+  const old = S.me ? (KF.weak && age > 20) || age > 180 : true;
   meMarker?.getElement()?.querySelector('.me')?.classList.toggle('old', old);
   chip.classList.toggle('warn', !S.me || old);
   chip.textContent = !S.me
@@ -2456,12 +2517,19 @@ async function mergeHeritage(list) {
 }
 
 // photos live in this browser's IndexedDB (no server / database needed); show how much room is used
+async function storageWarnings() {
+  if (IN_APP) return toast('⚠ أنت فاتح الموقع من داخل تطبيق (تلغرام/انستا…) — افتحه بـ Chrome أو Safari حتى الكاميرا تعطي الصورة الأصلية والـ GPS يشتغل صح', 9000);
+  try {
+    const e = await navigator.storage.estimate();
+    if (e.quota < 400 * 1048576) toast(`⚠ المساحة المتاحة للموقع قليلة (${fmtMB(e.quota)}). إذا أنت بوضع التصفح الخفي اطلع منه — هناك كل شي ينمسح من تسكّر. وإلا فرّغ مساحة بالتلفون.`, 10000);
+  } catch {}
+}
 async function storageInfo(el) {
   const n = await DB._tx('photos', 'readonly', st => st.count());
   const est = await navigator.storage?.estimate?.().catch(() => null);
   const persisted = await navigator.storage?.persisted?.().catch(() => false);
   const mb = v => (v / 1048576).toFixed(v > 1048576 * 100 ? 0 : 1) + ' MB';
-  el.innerHTML = `${n} صورة محفوظة${est ? ` · مستخدم ${mb(est.usage)} من ${mb(est.quota)} متاحة` : ''}<br>${persisted ? '✓ التخزين ثابت — المتصفح ما يمسح الصور تلقائياً' : '⚠ التخزين مو ثابت بعد — صدّروا نسخة ZIP بنهاية كل يوم'}<br>الصور تنحفظ على التلفون نفسه (بدون أي قاعدة بيانات أو اشتراك) وتنتقل للفريق بملف ZIP.`;
+  el.innerHTML = `${n} صورة محفوظة${est ? ` · مستخدم ${mb(est.usage)} من ${mb(est.quota)} متاحة` : ''}<br>${persisted ? '✓ التخزين ثابت — المتصفح ما يمسح الصور تلقائياً' : '⚠ التخزين مو ثابت بعد — صدّروا نسخة ZIP بنهاية كل يوم'}<br>الصور الأصلية تبقى على التلفون وتنرفع للـ Drive. إذا خلصت مساحة المتصفح، يبقى على التلفون نسخة 1600px والأصلية بالـ Drive.`;
 }
 async function wipeAll() {
   if (!confirm('راح ينمسح كل الرصد والصور من هذا الجهاز نهائياً. صدّرت نسخة قبل؟')) return;
@@ -2554,6 +2622,7 @@ $('#btnSite').onclick = () => map.flyTo(SITE_CENTER, SITE_ZOOM);
   if (teamSettings().code) teamConnect();
   if (teamSettings().sharing || S.settings.gpsOn) startGps();
   if (!S.settings.welcomed) setTimeout(openWelcome, 900);
+  setTimeout(storageWarnings, 2500);
   teamFromLink();
   await cloudFromLink();
   cloudStart();
