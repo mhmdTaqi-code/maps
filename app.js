@@ -3,7 +3,7 @@
 'use strict';
 
 // ---------------------------------------------------------------- constants
-const DATA_VERSION = '20';    // bump when files in data/ change (also in sw.js)
+const DATA_VERSION = '21';    // bump when files in data/ change (also in sw.js)
 const SITE_CENTER = [33.3387, 44.3935];
 const SITE_ZOOM = 17;
 const BAGHDAD_VIEWBOX = '44.20,33.45,44.55,33.20';
@@ -786,12 +786,14 @@ const PANELS = {
       <label class="f"><span>رابط السكربت (Web app URL)</span><input id="cUrl" dir="ltr" placeholder="https://script.google.com/macros/s/…/exec" value="${esc(cloudCfg().url)}"></label>
       <label class="f"><span>كلمة السر (SYNC_KEY)</span><input id="cKey" dir="ltr" type="password" value="${esc(cloudCfg().key)}"></label>
       <div class="row"><button class="btn primary" id="cTest">حفظ واختبار</button><button class="btn" id="cNow">زامن هسه</button></div>
+      ${cloudOn() ? '<div class="row" style="margin-top:8px"><button class="btn" id="cInvite">إرسال رابط المزامنة للفريق</button></div>' : ''}
       <details class="howto"><summary>شلون أفعّلها؟ (مرة وحدة، 3 دقايق، مجاناً)</summary>
         <ol>
           <li>افتح <a href="https://script.google.com/home/projects/create" target="_blank" rel="noopener">script.google.com</a> بحساب Google (حساب الجامعة إذا مساحته أكبر).</li>
-          <li>امسح الموجود والصق كود <a href="https://github.com/mhmdTaqi-code/maps/blob/main/cloud/Code.gs" target="_blank" rel="noopener">Code.gs</a>، وغيّر <code>SYNC_KEY</code> لكلمة سر طويلة.</li>
+          <li>امسح الموجود والصق كود <a href="https://github.com/mhmdTaqi-code/maps/blob/main/cloud/Code.gs" target="_blank" rel="noopener">Code.gs</a>.</li>
           <li>Deploy ← New deployment ← Web app ← Execute as: <b>Me</b> ← Who has access: <b>Anyone</b> ← Deploy، ووافق على الصلاحيات.</li>
-          <li>انسخ رابط الـ Web app والصقه هنا ويه كلمة السر، ودوس «حفظ واختبار». ودزّ نفس الرابط والكلمة للفريق.</li>
+          <li>اختار الدالة <code>setup</code> ودوس Run. تطلع كلمة سر عشوائية و<b>رابط انضمام</b> بتبويب «الإعداد» بجدول السجل بالـ Drive.</li>
+          <li>افتح رابط الانضمام بالتلفون — التطبيق يتفعّل وحده — ودزّه للفريق.</li>
         </ol>
         <p>الصور تنحفظ بمجلد «مسح السايت» بـ Drive مالتك، كل مبنى بمجلد، والسجل بجدول Google Sheets بنفس المجلد. محد يكدر يوصلها بدون كلمة السر.</p>
       </details>
@@ -831,6 +833,12 @@ const PANELS = {
           cloudStart();
         } catch (err) { $('#cloudStatus', body).textContent = '⚠ ما اشتغل: ' + (err.message === 'bad key' ? 'كلمة السر غلط' : err.message); }
         e.target.disabled = false;
+      };
+      const inv = $('#cInvite', body);
+      if (inv) inv.onclick = async () => {
+        const text = `فعّل مزامنة مسح السايت (افتحه بالتلفون):\n${cloudJoinLink()}`;
+        if (navigator.share) { try { await navigator.share({ title: 'مزامنة مسح السايت', text }); return; } catch (e) { if (e.name === 'AbortError') return; } }
+        try { await navigator.clipboard.writeText(text); toast('انسخ — دزّه للفريق بس'); } catch { prompt('انسخ:', text); }
       };
       $('#cNow', body).onclick = () => { if (!cloudOn()) return toast('فعّل المزامنة أول'); cloudSync(); };
       $('.chips[data-name="theme"]', body).addEventListener('change', () => { S.settings.theme = chipVal(body, 'theme') || 'auto'; applyTheme(); saveSettings(); });
@@ -1627,6 +1635,22 @@ function openTeam() {
 $('#btnTeam').onclick = openTeam;
 
 // joining from a shared link: https://…/maps/#team=CODE
+// cloud join link (made by the Apps Script `setup`): https://…/maps/#cloud=<encoded web app url>~<key>
+async function cloudFromLink() {
+  const m = location.hash.match(/cloud=([^~&]+)~([A-Za-z0-9]+)/); if (!m) return;
+  history.replaceState(null, '', location.pathname + location.search);
+  const url = decodeURIComponent(m[1]);
+  if (!/^https:\/\/script\.google(usercontent)?\.com\//.test(url)) return toast('رابط المزامنة غير صالح');
+  const c = cloudCfg();
+  if (c.url === url && c.key === m[2]) return;
+  if (!confirm('تفعّل المزامنة السحابية مع Drive الفريق؟ صورك وسجلاتك راح تنرفع وتشوف شغل الباقين.')) return;
+  Object.assign(c, { url, key: m[2], lastPull: '', lastPush: '' }); await saveSettings();
+  try { const j = await cloudCall({ action: 'ping' }, 30000); toast(`✓ المزامنة شغّالة — بالسحابة ${j.photos} صورة`, 4000); }
+  catch (e) { toast('⚠ ما اشتغلت المزامنة: ' + e.message, 5000); }
+  cloudStart();
+}
+// the same link, so a teammate who is already set up can invite others
+function cloudJoinLink() { const c = cloudCfg(); return `${location.origin}${location.pathname}#cloud=${encodeURIComponent(c.url)}~${c.key}`; }
 async function teamFromLink() {
   const m = location.hash.match(/team=([A-Za-z0-9-]+)/); if (!m) return;
   history.replaceState(null, '', location.pathname + location.search);
@@ -2243,6 +2267,7 @@ $('#btnSite').onclick = () => map.flyTo(SITE_CENTER, SITE_ZOOM);
   L_.team.addTo(map);
   if (teamSettings().code) { teamConnect(); if (teamSettings().sharing) startGps(); }
   teamFromLink();
+  await cloudFromLink();
   cloudStart();
   $$('.modes button').forEach(b => b.classList.toggle('on', b.dataset.mode === S.settings.mode));
   applyLayerVisibility();

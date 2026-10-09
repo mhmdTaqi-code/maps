@@ -3,14 +3,16 @@
  *
  * Photos go to a Google Drive folder, survey records to a Google Sheet in the same folder.
  * Setup (once, ~3 minutes):
- *   1. https://script.google.com → New project → paste this whole file → change SYNC_KEY below.
+ *   1. https://script.google.com → New project → paste this whole file.
  *   2. Deploy → New deployment → type "Web app" → Execute as: Me → Who has access: Anyone → Deploy
- *      → authorise with your Google account → copy the Web app URL (…/exec).
- *   3. In the app: «المزيد» → «المزامنة السحابية» → paste the URL and the same SYNC_KEY → «اختبار».
- * Every teammate enters the same URL + key. Nothing is public: requests without the key are refused,
- * and the photos stay private in your Drive (the app fetches them through this script).
+ *      → authorise with your Google account.
+ *   3. Select the function `setup` → Run. It creates the Drive folder + sheet and a random secret key,
+ *      and writes the team JOIN LINK into the sheet's «الإعداد» tab (and the execution log).
+ *   4. Open the join link on your phone and send it to the team — the app configures itself.
+ * Nothing is public: requests without the key are refused, and the photos stay private in your Drive
+ * (the app fetches them through this script). Run `rotateKey` to revoke access and get a new link.
  */
-const SYNC_KEY = 'CHANGE-ME-to-a-long-secret';   // ← غيّره لكلمة سر طويلة، ونفسها تنكتب بالتطبيق
+const APP_URL = 'https://mhmdtaqi.me/maps/';
 const ROOT_NAME = 'مسح السايت — الرصافة القديمة';
 const MAX_CELL = 45000;                             // Sheets cell limit is 50,000 characters
 
@@ -19,7 +21,8 @@ function doGet() { return out({ ok: true, service: 'site-survey-cloud', version:
 function doPost(e) {
   let req;
   try { req = JSON.parse(e.postData.contents); } catch (err) { return out({ ok: false, error: 'bad request' }); }
-  if (!req || req.key !== SYNC_KEY || SYNC_KEY.indexOf('CHANGE-ME') === 0) return out({ ok: false, error: 'bad key' });
+  const k = props().getProperty('SYNC_KEY');
+  if (!req || !k || req.key !== k) return out({ ok: false, error: 'bad key' });
   try {
     switch (req.action) {
       case 'ping': return out(ping());
@@ -144,3 +147,21 @@ function pull(req) {
   });
   return { ok: true, records: records, photos: photos, now: t };
 }
+
+// ---- setup: random key + join link (run from the editor after deploying)
+function setup() {
+  const p = props();
+  if (!p.getProperty('SYNC_KEY')) p.setProperty('SYNC_KEY', Utilities.getUuid().replace(/-/g, '') + Utilities.getUuid().replace(/-/g, '').slice(0, 12));
+  const ss = book(); root();
+  const url = ScriptApp.getService().getUrl();
+  if (!url) throw new Error('انشر السكربت أول: Deploy → New deployment → Web app');
+  const link = APP_URL + '#cloud=' + encodeURIComponent(url) + '~' + p.getProperty('SYNC_KEY');
+  let sh = ss.getSheetByName('الإعداد'); if (!sh) sh = ss.insertSheet('الإعداد');
+  sh.clear();
+  sh.getRange(1, 1, 4, 1).setValues([['رابط الانضمام للمزامنة — افتحه بالتلفون ودزّه للفريق بس (بيه كلمة السر):'], [link], ['المجلد: ' + root().getUrl()], ['لإلغاء الوصول القديم: شغّل rotateKey من السكربت وخذ الرابط الجديد من هنا.']]);
+  sh.setColumnWidth(1, 900);
+  Logger.log('JOIN LINK: ' + link);
+  Logger.log('SHEET: ' + ss.getUrl());
+  return link;
+}
+function rotateKey() { props().deleteProperty('SYNC_KEY'); return setup(); }
