@@ -25,10 +25,10 @@ const MAX_CELL = 45000;                             // Sheets cell limit is 50,0
 const MAX_PHOTO_B64 = 48 * 1024 * 1024;              // ≈ 35 MB per photo — Apps Script accepts ≈ 50 MB per request
 const DAILY_PHOTOS_PER_DEVICE = 5000;
 // thumb = small base64 preview sent first so teammates see the photo within seconds; previewId = 1600 px copy
-const PHOTO_COLS = ['photoId', 'fileId', 'owner', 'created', 'device', 'synced', 'bytes', 'observer', 'lat', 'lng', 'link', 'name', 'thumb', 'previewId'];
+const PHOTO_COLS = ['photoId', 'fileId', 'owner', 'created', 'device', 'synced', 'bytes', 'observer', 'lat', 'lng', 'link', 'name', 'thumb', 'previewId', 'deleted'];
 const MAX_THUMB_B64 = 45000;
 
-function doGet() { return out({ ok: true, service: 'site-survey-cloud', version: 6, open: OPEN_ACCESS }); }
+function doGet() { return out({ ok: true, service: 'site-survey-cloud', version: 7, open: OPEN_ACCESS }); }
 
 function doPost(e) {
   let req;
@@ -47,6 +47,7 @@ function doPost(e) {
       case 'putRecords': return out(withLock(() => putRecords(req)));
       case 'pull': return out(pull(req));
       case 'loc': return out(loc(req));
+      case 'delPhotos': return out(delPhotos(req));
       case 'epoch': return out({ ok: true, epoch: props().getProperty('EPOCH') || '' });
       default: return out({ ok: false, error: 'unknown action' });
     }
@@ -133,6 +134,7 @@ function putThumb(req) {
   const sh = book().getSheetByName('photos'), m = req.meta || {};
   return withLock(() => {
     const row = photoRow(sh, req.id);
+    if (row && sh.getRange(row, 15).getValue()) return { ok: true, deleted: true };
     if (row) { sh.getRange(row, 13).setValue(req.thumb); sh.getRange(row, 6).setValue(now()); }
     else sh.appendRow([req.id, '', clean(req.ownerName || req.owner), m.created || '', req.device || '', now(), '', clean(m.observer), m.lat || '', m.lng || '', '', clean(m.name), req.thumb, '']);
     bump();
@@ -147,6 +149,7 @@ function putPhoto(req) {
   const sh = book().getSheetByName('photos');
   const existing = photoRow(sh, req.id);
   if (existing) {
+    if (sh.getRange(existing, 15).getValue()) return { ok: true, deleted: true };
     const fid = sh.getRange(existing, 2).getValue();
     if (fid) return { ok: true, fileId: fid, existed: true };
   }
@@ -167,6 +170,10 @@ function putPhoto(req) {
   }
   withLock(() => {
     const row = photoRow(sh, req.id);   // the thumb may already have created the row
+    if (row && sh.getRange(row, 15).getValue()) {   // deleted while it was uploading
+      try { file.setTrashed(true); if (previewId) DriveApp.getFileById(previewId).setTrashed(true); } catch (e) {}
+      return;
+    }
     const vals = [req.id, file.getId(), clean(req.ownerName || req.owner), m.created || '', req.device || '', now(), bytes.length,
                   clean(m.observer), m.lat || '', m.lng || '', file.getUrl(), clean(m.name), row ? sh.getRange(row, 13).getValue() : (req.thumb || ''), previewId];
     if (row) sh.getRange(row, 1, 1, vals.length).setValues([vals]); else sh.appendRow(vals);
@@ -175,6 +182,29 @@ function putPhoto(req) {
   bump();
   return { ok: true, fileId: file.getId() };
 }
+// ---- deleting photos: the files go to the Drive trash (recoverable for 30 days) and every phone drops them
+function delPhotos(req) {
+  const sh = book().getSheetByName('photos'), t = now();
+  let n = 0;
+  withLock(() => {
+    (req.ids || []).slice(0, 200).forEach(function (id) {
+      id = String(id); if (!id) return;
+      const row = photoRow(sh, id);
+      if (!row) {   // not uploaded yet: leave a marker so a late upload of it is ignored
+        const r = PHOTO_COLS.map(function () { return ''; }); r[0] = id; r[4] = req.device || ''; r[5] = t; r[14] = t;
+        sh.appendRow(r); n++; return;
+      }
+      const v = sh.getRange(row, 1, 1, PHOTO_COLS.length).getValues()[0];
+      if (v[14]) return;
+      [v[1], v[13]].forEach(function (fid) { if (fid) { try { DriveApp.getFileById(fid).setTrashed(true); } catch (e) {} } });
+      sh.getRange(row, 6).setValue(t); sh.getRange(row, 13).setValue(''); sh.getRange(row, 15).setValue(t);
+      n++;
+    });
+  });
+  if (n) bump();
+  return { ok: true, deleted: n };
+}
+
 // only files this script stored as survey photos can be read back.
 // size: 'thumb' (stored base64 or Drive thumbnail), 'preview' (1600 px copy; small originals as-is), 'full'
 function getPhoto(req) {
@@ -182,6 +212,7 @@ function getPhoto(req) {
   const hit = req.fileId && sh.getRange('B:B').createTextFinder(String(req.fileId)).matchEntireCell(true).findNext();
   if (!hit) return { ok: false, error: 'not a survey photo' };
   const row = hit.getRow(), size = req.size || (req.thumb ? 'thumb' : 'full');
+  if (sh.getRange(row, 15).getValue()) return { ok: false, error: 'deleted' };
   if (size === 'thumb') { const t = sh.getRange(row, 13).getValue(); if (t) return { ok: true, mime: 'image/webp', data: t }; }
   if (size === 'preview') {
     const pid = sh.getRange(row, 14).getValue();
@@ -285,7 +316,9 @@ function pull(req) {
   });
   const phSh = ss.getSheetByName('photos'), m = phSh.getLastRow(), photos = [];
   if (m > 1) phSh.getRange(2, 1, m - 1, PHOTO_COLS.length).getValues().forEach(function (v) {
-    if (String(v[5]) > since) photos.push({ id: v[0], fileId: v[1], owner: v[2], created: v[3], device: v[4], observer: v[7], thumb: v[12] || '' });
+    if (String(v[5]) <= since) return;
+    if (v[14]) photos.push({ id: v[0], deleted: true });
+    else photos.push({ id: v[0], fileId: v[1], owner: v[2], created: v[3], device: v[4], observer: v[7], thumb: v[12] || '' });
   });
   return { ok: true, records: records, photos: photos, now: t };
 }

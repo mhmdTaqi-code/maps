@@ -342,3 +342,5 @@ details.howto code { background: var(--panel); padding: 0 4px; border-radius: 4p
 /* gallery: fetch the original from Drive */
 .lightbox .lb-full { position: absolute; top: calc(56px + env(safe-area-inset-top, 0px)); left: 14px; border: 0; background: rgba(255,255,255,.15); color: #fff; border-radius: 999px; padding: 6px 12px; font-size: 13px; cursor: pointer; }
 .lightbox .lb-cap { white-space: normal; max-width: 92vw; text-align: center; }
+
+.lightbox .lb-del { position: absolute; top: calc(98px + env(safe-area-inset-top, 0px)); left: 14px; border: 0; background: rgba(229,57,53,.75); color: #fff; border-radius: 999px; padding: 6px 12px; font-size: 13px; cursor: pointer; }

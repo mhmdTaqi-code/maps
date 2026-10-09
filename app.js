@@ -3,7 +3,7 @@
 'use strict';
 
 // ---------------------------------------------------------------- constants
-const DATA_VERSION = '33';    // bump when files in data/ change (also in sw.js)
+const DATA_VERSION = '34';    // bump when files in data/ change (also in sw.js)
 const SITE_CENTER = [33.3387, 44.3935];
 const SITE_ZOOM = 17;
 const BAGHDAD_VIEWBOX = '44.20,33.45,44.55,33.20';
@@ -311,7 +311,7 @@ function openStreet(sid) {
   const [label, color] = STREET_KINDS[p.kind] || STREET_KINDS.alley;
   const len = turf.length({ type: 'Feature', geometry: calibGeo(f.geometry) }) * 1000;
   openSheet(rec.name || p.name || `${label} ${sid}`, `
-    <div class="hero" id="hero">${(rec.photos || []).length ? '' : `<div class="hero-empty"><span>ماكو صور لهذا المسار بعد</span></div>`}</div>
+    <div class="hero" id="hero">${livePhotos(rec.photos).length ? '' : `<div class="hero-empty"><span>ماكو صور لهذا المسار بعد</span></div>`}</div>
     <div class="row" style="margin:10px 0 4px"><button class="btn primary" id="sCam">📷 صوّر المسار</button><button class="btn" id="sGal">🖼 من المعرض</button></div>
     <dl class="kv">
       <dt>النوع</dt><dd><span class="badge"><span class="dot" style="background:${color}"></span>${label}</span></dd>
@@ -321,7 +321,7 @@ function openStreet(sid) {
     </dl>
     <label class="f" style="margin-top:12px"><span>ملاحظات (حركة، أرضية، إحساس المكان…)</span><textarea id="sNotes">${esc(rec.notes)}</textarea></label>
     <button class="btn primary block" id="sSave">حفظ</button>`, body => {
-    renderHero($('#hero', body), rec.photos || [], sid);
+    renderHero($('#hero', body), livePhotos(rec.photos), sid);
     $('#sCam', body).onclick = async () => { if (await addPhotosTo(sid, true)) openStreet(sid); };
     $('#sGal', body).onclick = async () => { if (await addPhotosTo(sid, false)) openStreet(sid); };
     $('#sSave', body).onclick = async () => { await putHeritage({ ...rec, id: sid, notes: $('#sNotes', body).value.trim() }); toast('انحفظ ✓'); };
@@ -377,13 +377,13 @@ async function renderThumbs() {
   const run = ++thumbRun;
   const items = [];
   for (const r of S.heritage.values()) {
-    if (!(r.photos || []).length || isHP(r.id)) continue;   // field points draw their own photo marker
+    if (!livePhotos(r.photos).length || isHP(r.id)) continue;   // field points draw their own photo marker
     const f = buildingFeature(r.id); if (!f) continue;
-    items.push({ ll: labelPoint(f), photo: r.photos[0], n: r.photos.length, open: () => openBuilding(r.id) });
+    { const ps = livePhotos(r.photos); items.push({ ll: labelPoint(f), photo: ps[0], n: ps.length, open: () => openBuilding(r.id) }); }
   }
   for (const f of S.features.values()) {
-    const p = f.properties; if (!(p.photos || []).length || p.kind === 'point') continue;
-    items.push({ ll: labelPoint(f), photo: p.photos[0], n: p.photos.length, open: () => openFeature(p.id) });
+    const p = f.properties; if (!livePhotos(p.photos).length || p.kind === 'point') continue;
+    { const ps = livePhotos(p.photos); items.push({ ll: labelPoint(f), photo: ps[0], n: ps.length, open: () => openFeature(p.id) }); }
   }
   const markers = [];
   for (const it of items) {
@@ -409,7 +409,7 @@ function surveyLayer(f) {
   let lyr;
   if (kind === 'point') {
     const [lng, lat] = f.geometry.coordinates;
-    const ph = (p.photos || [])[0];
+    const ph = livePhotos(p.photos)[0];
     lyr = L.marker([lat, lng], {
       pane: 'surveyPane',
       icon: L.divIcon({ className: '', html: ph ? `<div class="thumb-pin pt" data-ph="${ph}" style="border-color:${color}"></div>` : `<div class="pin" style="background:${color}"></div>`,
@@ -495,11 +495,13 @@ async function loadStatic() {
 // ---------------------------------------------------------------- persistence
 async function saveSettings() { try { await DB.put('meta', { id: 'settings', ...S.settings }); } catch {} }
 async function saveCalib() { await DB.put('meta', { id: 'calib', ...S.calib }); }
+const DELPH = new Set();            // photos deleted by anyone in the team
 async function loadUserData() {
   const [feats, her, meta] = await Promise.all([DB.all('features'), DB.all('heritage'), DB.all('meta')]);
   feats.forEach(f => S.features.set(f.id, f.feature));
   her.forEach(h => S.heritage.set(h.id, h));
   for (const m of meta) {
+    if (m.id.startsWith('delph:')) DELPH.add(m.id.slice(6));
     if (m.id === 'settings') { const { id, ...rest } = m; S.settings = { ...S.settings, ...rest, layers: { ...S.settings.layers, ...(rest.layers || {}) } }; }
     if (m.id === 'calib') { const { id, ...rest } = m; S.calib = { ...S.calib, ...rest }; }
   }
@@ -510,6 +512,19 @@ const PENDING = { ids: null };
 async function pendingLoad() { if (!PENDING.ids) { const d = await DB.get('meta', 'pending').catch(() => null); if (d) PENDING.ids = d.ids; } return PENDING.ids; }
 async function pendingSave() { await DB.put('meta', { id: 'pending', ids: PENDING.ids || {} }); }
 async function markPending(id, store) { await pendingLoad(); (PENDING.ids ||= {})[id] = store; await pendingSave(); }
+// delete photos for real: off this phone now, off every teammate's phone and into the Drive trash on the next sync
+async function forgetPhoto(id) {
+  DELPH.add(id);
+  await DB.del('photos', id).catch(() => {});
+  await DB.put('meta', { id: 'delph:' + id, at: nowIso() }).catch(() => {});
+  for (const k of [id, id + ':t', id + ':o']) { const u = S.urls.get(k); if (u) URL.revokeObjectURL(u); S.urls.delete(k); }
+}
+async function deletePhotos(ids) {
+  for (const id of ids) { await forgetPhoto(id); await markPending(id, 'delphoto'); }
+  if (ids.length) cloudKick(1500);
+}
+// drop deleted photos from a record's list (records from older phones may still name them)
+const livePhotos = list => (list || []).filter(x => !DELPH.has(x));
 async function putFeature(f) {
   f.properties.updated = nowIso();
   S.features.set(f.properties.id, f);
@@ -612,6 +627,23 @@ async function showGal() {
   $('.lb-full', lb).hidden = isOrig || !p?.cloud;
   $('.lb-prev', lb).hidden = $('.lb-next', lb).hidden = GAL.ids.length < 2;
 }
+async function galDelete() {
+  const id = GAL.ids[GAL.i];
+  if (!confirm('تحذف هاي الصورة نهائياً؟ تنمسح من كل التلفونات ومن الـ Drive (تبقى بسلة مهملات الـ Drive 30 يوم).')) return;
+  for (const r of [...S.heritage.values()]) if ((r.photos || []).includes(id)) {
+    r.photos = r.photos.filter(x => x !== id); r.removedPhotos = [...new Set([...(r.removedPhotos || []), id])];
+    await putHeritage(r); refreshBuilding(r.id);
+  }
+  for (const f of [...S.features.values()]) if ((f.properties.photos || []).includes(id)) {
+    f.properties.photos = f.properties.photos.filter(x => x !== id); f.properties.removedPhotos = [...new Set([...(f.properties.removedPhotos || []), id])];
+    await putFeature(f);
+  }
+  await deletePhotos([id]);
+  GAL.ids = GAL.ids.filter(x => x !== id);
+  if (!GAL.ids.length) $('#lightbox').hidden = true; else { GAL.i = Math.min(GAL.i, GAL.ids.length - 1); showGal(); }
+  renderSurvey(); renderHeritagePoints(); refreshView();
+  toast('انحذفت الصورة');
+}
 async function galOriginal(save) {
   const id = GAL.ids[GAL.i], p = await DB.get('photos', id); if (!p) return;
   const local = p.blob && !p.slim && !p.remote;
@@ -635,6 +667,7 @@ function galStep(d) { GAL.i = (GAL.i + d + GAL.ids.length) % GAL.ids.length; sho
     if (e.target.closest('.lb-next')) return galStep(-1);
     if (e.target.closest('.lb-dl')) return galOriginal(true);          // always the original, never the preview
     if (e.target.closest('.lb-full')) return galOriginal(false);
+    if (e.target.closest('.lb-del')) return galDelete();
     if (e.target.tagName !== 'IMG') lb.hidden = true;
   });
   let x0 = null;
@@ -927,11 +960,11 @@ function applyTheme() {
 let GALLERY_GROUPS = [];
 function galleryGroups() {
   const out = [];
-  for (const r of S.heritage.values()) if ((r.photos || []).length && (isHP(r.id) || S.geoIndex?.has(r.id)))
-    out.push({ title: buildingTitle(r.id, r), sub: isHP(r.id) ? `مبنى حفاظ ${r.id}` : `مبنى ${r.id}`, ids: r.photos, updated: r.updated || '', go: () => { flyToBuilding(r.id); openRecord(r.id); } });
-  for (const f of S.features.values()) if ((f.properties.photos || []).length) {
+  for (const r of S.heritage.values()) if (livePhotos(r.photos).length && (isHP(r.id) || S.geoIndex?.has(r.id)))
+    out.push({ title: buildingTitle(r.id, r), sub: isHP(r.id) ? `مبنى حفاظ ${r.id}` : `مبنى ${r.id}`, ids: livePhotos(r.photos), updated: r.updated || '', go: () => { flyToBuilding(r.id); openRecord(r.id); } });
+  for (const f of S.features.values()) if (livePhotos(f.properties.photos).length) {
     const p = f.properties, cat = catOf(p.kind, p.category)[1];
-    out.push({ title: p.name || cat, sub: cat, ids: p.photos, updated: p.updated || '', go: () => { flyToFeature(p.id); openFeature(p.id); } });
+    out.push({ title: p.name || cat, sub: cat, ids: livePhotos(p.photos), updated: p.updated || '', go: () => { flyToFeature(p.id); openFeature(p.id); } });
   }
   return out.sort((a, b) => b.updated.localeCompare(a.updated));
 }
@@ -940,7 +973,7 @@ async function drawGallery(el, q) {
   // photos in the team Drive that no record points at (yet) — grouped by their Drive folder name
   const used = new Set(GALLERY_GROUPS.flatMap(g => g.ids)), loose = new Map();
   for (const ph of await DB.all('photos').catch(() => [])) {
-    if (used.has(ph.id) || !(ph.cloud || ph.blob)) continue;
+    if (used.has(ph.id) || DELPH.has(ph.id) || !(ph.cloud || ph.blob)) continue;
     const k = ph.owner || 'صور بدون مبنى';
     if (!loose.has(k)) loose.set(k, { title: k, sub: 'من Drive الفريق', ids: [], updated: ph.created || '', go: () => toast('هاي الصور مو مربوطة بمبنى بالخريطة') });
     loose.get(k).ids.push(ph.id);
@@ -985,14 +1018,14 @@ function listItems() {
   for (const f of S.features.values()) {
     const p = f.properties, [, label, color] = catOf(p.kind, p.category);
     out.push({ key: p.id, title: p.name || label, sub: `${label}${p.condition ? ' · ' + condOf(p.condition)?.[1] : ''} · ${fmtDate(p.created)}`,
-      search: `${p.notes || ''} ${p.observer || ''}`, color, photo: p.photos?.[0], updated: p.updated, dist: distTo(featureCenter(f)) });
+      search: `${p.notes || ''} ${p.observer || ''}`, color, photo: livePhotos(p.photos)[0], updated: p.updated, dist: distTo(featureCenter(f)) });
   }
   for (const r of S.heritage.values()) {
     if (!isDocumented(r)) continue;
     const f = buildingFeature(r.id); if (!f) continue;
     const her = isHeritageId(r.id);
-    out.push({ key: r.id, title: buildingTitle(r.id, r), sub: `${her ? 'مبنى حفاظ' : 'مبنى'} ${r.id}${r.condition ? ' · ' + condOf(r.condition)?.[1] : ''}${(r.photos || []).length ? ' · ' + r.photos.length + ' صورة' : ''}`,
-      search: `${r.notes || ''} ${r.use || ''} ${r.id}`, color: her ? '#9c3d16' : '#2e86ab', photo: r.photos?.[0], updated: r.updated, dist: distTo(featureCenter(f)) });
+    out.push({ key: r.id, title: buildingTitle(r.id, r), sub: `${her ? 'مبنى حفاظ' : 'مبنى'} ${r.id}${r.condition ? ' · ' + condOf(r.condition)?.[1] : ''}${livePhotos(r.photos).length ? ' · ' + livePhotos(r.photos).length + ' صورة' : ''}`,
+      search: `${r.notes || ''} ${r.use || ''} ${r.id}`, color: her ? '#9c3d16' : '#2e86ab', photo: livePhotos(r.photos)[0], updated: r.updated, dist: distTo(featureCenter(f)) });
   }
   return out;
 }
@@ -1063,7 +1096,7 @@ function editFeature(geometry, kind, existing) {
   const isNew = !existing;
   const p = existing ? { ...existing.properties } : { kind, category: kind === 'line' ? 'darb' : kind === 'polygon' ? 'building' : 'heritage', photos: [] };
   if (isNew && kind === 'line' && geometry._track) { p.category = 'track'; delete geometry._track; }
-  let photos = [...(p.photos || [])];
+  let photos = livePhotos(p.photos);
   let saved = false;
   const preview = isNew ? L.geoJSON({ type: 'Feature', geometry }, { pointToLayer: (f, ll) => L.circleMarker(ll, { radius: 9, color: '#fff', weight: 3, fillColor: '#e53935', fillOpacity: 1 }), style: { color: '#e53935', weight: 4, fillOpacity: .2 } }).addTo(L_.measure) : null;
   openSheet(isNew ? 'تسجيل عنصر جديد' : 'تعديل', `<p class="muted" style="margin-top:0">${measureText({ type: 'Feature', geometry })}</p>` + featureForm(kind, p), body => {
@@ -1082,7 +1115,7 @@ function editFeature(geometry, kind, existing) {
       const props = { ...p, ...vals, kind, photos, id: p.id || uid('F'), created: p.created || nowIso(), observer: p.observer || S.settings.observer, editedBy: S.settings.observer };
       if (removed.length) props.removedPhotos = [...new Set([...(p.removedPhotos || []), ...removed])];
       const f = { type: 'Feature', properties: props, geometry: existing ? existing.geometry : geometry };
-      await putFeature(f); saved = true;
+      await putFeature(f); await deletePhotos(removed); saved = true;
       renderSurvey(); closeSheet(); toast('انحفظ ✓');
     };
     return () => { if (preview) L_.measure.removeLayer(preview); if (!saved && isNew) { /* discarded */ } };
@@ -1107,7 +1140,7 @@ async function openFeature(id) {
   openSheet(p.name || label, `
     <dl class="kv">${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>
     ${p.notes ? `<h3>ملاحظات</h3><p style="white-space:pre-wrap;margin:0;font-size:14px;line-height:1.7">${esc(p.notes)}</p>` : ''}
-    <h3>الصور (${(p.photos || []).length})</h3><div class="photos" id="dph"></div>
+    <h3>الصور (${livePhotos(p.photos).length})</h3><div class="photos" id="dph"></div>
     <div class="row" style="margin-top:14px">
       <button class="btn primary" id="edit">تعديل المعلومات</button>
       ${p.kind !== 'point' ? '<button class="btn" id="shape">تعديل الشكل</button>' : '<button class="btn" id="move">نقلها لموقعي</button>'}
@@ -1116,13 +1149,13 @@ async function openFeature(id) {
       <a class="btn" href="https://www.google.com/maps/dir/?api=1&destination=${c[0]},${c[1]}&travelmode=walking" target="_blank" rel="noopener">اتجاهات</a>
       <button class="btn danger" id="del">حذف</button>
     </div>`, body => {
-    renderPhotoGrid($('#dph', body), p.photos || []);
+    renderPhotoGrid($('#dph', body), livePhotos(p.photos));
     $('#edit', body).onclick = () => editFeature(f.geometry, p.kind, f);
     $('#del', body).onclick = async () => {
       if (!confirm(`حذف «${p.name || label}» نهائياً؟`)) return;
       S.features.delete(id); await DB.del('features', id);
       await DB.put('meta', { id: 'del:' + id, updated: nowIso() }); await markPending(id, 'deleted'); cloudKick();     // tell teammates' phones too
-      for (const ph of p.photos || []) await DB.del('photos', ph);
+      await deletePhotos(p.photos || []);
       renderSurvey(); closeSheet(); toast('انحذف');
     };
     const mv = $('#move', body);
@@ -1201,7 +1234,7 @@ function openBuilding(id, refresh) {
     rec.visitedAt && ['وثّقه', `${esc(rec.visitedBy || '—')} · ${fmtDate(rec.visitedAt)}`],
   ].filter(Boolean);
   const hpId = hpOfMember.get(id), fieldRec = hpId && S.heritage.get(hpId);
-  const photos = [...new Set([...(rec.photos || []), ...(fieldRec?.photos || [])])];
+  const photos = livePhotos([...new Set([...(rec.photos || []), ...(fieldRec?.photos || [])])]);
   openSheet(buildingTitle(id, rec), `
     <div class="hero" id="hero">${photos.length ? '' : `<div class="hero-empty"><svg viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg><span>ماكو صور لهذا المبنى بعد</span></div>`}</div>
     <div class="row" style="margin:10px 0 4px">
@@ -1231,7 +1264,7 @@ function openBuilding(id, refresh) {
 
 function editBuilding(id) {
   const rec = { id, visited: false, photos: [], ...(S.heritage.get(id) || {}) };
-  let photos = [...(rec.photos || [])];
+  let photos = livePhotos(rec.photos);
   select(id);
   openSheet('توثيق ' + buildingTitle(id, rec), `
     ${swHtml('visited', 'زرناه ووثّقناه', rec.visitedAt ? `${esc(rec.visitedBy || '')} · ${fmtDate(rec.visitedAt)}` : 'يتعلّم تلقائياً لمن تضيف صور أو معلومات', rec.visited)}
@@ -1255,7 +1288,7 @@ function editBuilding(id) {
       if (removed.length) rec.removedPhotos = [...new Set([...(rec.removedPhotos || []), ...removed])];
       if (!rec.visited && isDocumented(rec)) rec.visited = true;
       if (rec.visited && !was) { rec.visitedAt = nowIso(); rec.visitedBy = S.settings.observer; }
-      await putHeritage(rec); refreshBuilding(id); toast('انحفظ ✓'); openRecord(id);
+      await putHeritage(rec); await deletePhotos(removed); refreshBuilding(id); toast('انحفظ ✓'); openRecord(id);
     };
     return () => select(null);
   });
@@ -1418,9 +1451,9 @@ const hpRec = id => S.heritage.get(id) || { id, photos: [] };
 function renderHeritagePoints() {
   L_.hpts.clearLayers();
   for (const [id, f] of hpById) {
-    const rec = S.heritage.get(id), ph = rec?.photos?.[0], [lng, lat] = f.geometry.coordinates;
+    const rec = S.heritage.get(id), ph = livePhotos(rec?.photos)[0], [lng, lat] = f.geometry.coordinates;
     const cls = `hp-pin${rec?.visited ? ' visited' : ''}${rec?.boundary ? ' drawn' : ''}`;
-    const html = ph ? `<div class="thumb-pin hp-photo${rec?.visited ? ' visited' : ''}" data-ph="${ph}">${rec.photos.length > 1 ? `<b>${rec.photos.length}</b>` : ''}</div>`
+    const html = ph ? `<div class="thumb-pin hp-photo${rec?.visited ? ' visited' : ''}" data-ph="${ph}">${livePhotos(rec.photos).length > 1 ? `<b>${livePhotos(rec.photos).length}</b>` : ''}</div>`
       : `<div class="${cls}"><span>${id.slice(2)}</span></div>`;
     const m = L.marker([lat, lng], { pane: 'thumbPane', icon: L.divIcon({ className: '', html, iconSize: ph ? [38, 38] : [28, 28], iconAnchor: ph ? [19, 19] : [14, 14] }) });
     if (ph) m.on('add', async () => { const el = m.getElement()?.querySelector('[data-ph]'); if (el) el.style.backgroundImage = `url(${await photoUrl(ph)})`; });
@@ -1450,7 +1483,7 @@ function openHeritagePoint(id) {
     rec.visitedAt && ['وثّقه', `${esc(rec.visitedBy || '—')} · ${fmtDate(rec.visitedAt)}`],
   ].filter(Boolean);
   openSheet(buildingTitle(id, rec), `
-    <div class="hero" id="hero">${(rec.photos || []).length ? '' : `<div class="hero-empty"><svg viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg><span>ماكو صور بعد — صوّروا المبنى من أكثر من زاوية</span></div>`}</div>
+    <div class="hero" id="hero">${livePhotos(rec.photos).length ? '' : `<div class="hero-empty"><svg viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg><span>ماكو صور بعد — صوّروا المبنى من أكثر من زاوية</span></div>`}</div>
     <div class="row" style="margin:10px 0 4px">
       <button class="btn primary" id="hCam">📷 صوّر</button>
       <button class="btn" id="hGal">🖼 صور كثيرة من المعرض</button>
@@ -1467,7 +1500,7 @@ function openHeritagePoint(id) {
       <a class="btn" href="https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=walking" target="_blank" rel="noopener">اتجاهات</a>
     </div>
     <p class="muted" style="margin-top:10px">الموقع تقريبي من مخطط الحفاظ. المبنى الحقيقي يتحدد بالموقع — ارسم حدوده بعد ما تتأكد منه.</p>`, body => {
-    renderHero($('#hero', body), rec.photos || [], id);
+    renderHero($('#hero', body), livePhotos(rec.photos), id);
     $('#hCam', body).onclick = async () => { if (await addPhotosTo(id, true)) openHeritagePoint(id); };
     $('#hGal', body).onclick = async () => { if (await addPhotosTo(id, false)) openHeritagePoint(id); };
     $('#hEdit', body).onclick = () => editBuilding(id);
@@ -1713,7 +1746,7 @@ function glide(mk, to, ms = 1200) {
 }
 function renderTeam() {
   const ts = teamSettings();
-  for (const [id, m] of TEAM.members) if ((Date.now() - m.t) / 1000 > 6 * 3600) TEAM.members.delete(id);
+  for (const [id, m] of TEAM.members) if (Date.now() - m.t > 30 * 60000) TEAM.members.delete(id);
   for (const [id, L0] of mateLayers) if (!TEAM.members.has(id) || !ts.viewing) { L_.team.removeLayer(L0.mk); if (L0.circle) L_.team.removeLayer(L0.circle); mateLayers.delete(id); }
   if (ts.viewing) for (const [id, m] of TEAM.members) {
     if (m.la == null) continue;
@@ -1975,8 +2008,15 @@ async function cloudSync() {
       for (const d of await DB.all('meta')) if (d.id.startsWith('del:') && (d.updated || '') > (c.lastPush || '')) PENDING.ids[d.id.slice(4)] = 'deleted';
       await pendingSave();
     }
+    const gone = Object.keys(PENDING.ids).filter(id => PENDING.ids[id] === 'delphoto');
+    if (gone.length) {
+      await cloudCall({ action: 'delPhotos', ids: gone });
+      for (const id of gone) delete PENDING.ids[id];
+      await pendingSave();
+    }
     const recs = [];
     for (const [id, store] of Object.entries(PENDING.ids)) {
+      if (store === 'delphoto') continue;
       if (store === 'features' && S.features.has(id)) { const f = S.features.get(id); recs.push({ id, store, updated: f.properties.updated, data: f }); }
       else if (store === 'heritage' && S.heritage.has(id)) { const r = S.heritage.get(id); recs.push({ id, store, updated: r.updated, data: r }); }
       else if (store === 'deleted') recs.push({ id, store, updated: (await DB.get('meta', 'del:' + id))?.updated || nowIso(), data: { id } });
@@ -2004,9 +2044,11 @@ async function cloudSync() {
       try {
         const big = p.blob.size > 1.5e6;
         const preview = big ? await compressImage(p.blob, 1600, .82).catch(() => null) : null;
+        if (DELPH.has(p.id)) continue;
         const j = await cloudCall({ action: 'putPhoto', id: p.id, mime: p.blob.type || 'image/jpeg', data: await blobToB64(p.blob),
           preview: preview ? await blobToB64(preview) : undefined, thumb: p.thumb ? await blobToB64(p.thumb) : undefined,
           ownerId: owners.get(p.id)?.id || '', ownerName: owners.get(p.id)?.name || '', meta: meta(p) }, 60000 + p.blob.size / 25);   // ≈ 25 KB/s worst case
+        if (j.deleted) { await forgetPhoto(p.id); continue; }
         p.cloud = j.fileId;
         // the original stays on the phone too; only when the browser's storage runs low is it swapped for the 1600 px copy
         if (preview && await storageTight()) { p.blob = preview; p.slim = true; }
@@ -2031,6 +2073,8 @@ async function cloudSync() {
     }
     let newPhotos = 0;
     for (const ph of j.photos) {
+      if (ph.deleted) { if (!DELPH.has(ph.id)) { await forgetPhoto(ph.id); newPhotos++; } continue; }
+      if (DELPH.has(ph.id)) continue;
       const cur = await DB.get('photos', ph.id);
       const thumb = ph.thumb ? b64ToBlob(ph.thumb, 'image/webp') : null;
       if (!cur) { await DB.put('photos', { id: ph.id, cloud: ph.fileId || '', remote: true, created: ph.created, observer: ph.observer, owner: ph.owner, thumb }); newPhotos++; }
@@ -2576,9 +2620,10 @@ function importFile() {
 }
 // two people adding photos to the same record at once: keep both sets (except photos someone removed on purpose)
 function unionPhotos(a, b) {
-  const gone = new Set([...(a.removedPhotos || []), ...(b.removedPhotos || [])]);
+  const gone = new Set([...(a.removedPhotos || []), ...(b.removedPhotos || []), ...DELPH]);
   const add = (b.photos || []).filter(x => !(a.photos || []).includes(x) && !gone.has(x));
-  if (gone.size) a.removedPhotos = [...gone];
+  const rm = [...new Set([...(a.removedPhotos || []), ...(b.removedPhotos || [])])];
+  if (rm.length) a.removedPhotos = rm;
   if (!add.length) return false;
   a.photos = [...(a.photos || []).filter(x => !gone.has(x)), ...add];
   return true;
