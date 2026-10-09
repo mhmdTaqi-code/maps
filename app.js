@@ -3,7 +3,7 @@
 'use strict';
 
 // ---------------------------------------------------------------- constants
-const DATA_VERSION = '22';    // bump when files in data/ change (also in sw.js)
+const DATA_VERSION = '23';    // bump when files in data/ change (also in sw.js)
 const SITE_CENTER = [33.3387, 44.3935];
 const SITE_ZOOM = 17;
 const BAGHDAD_VIEWBOX = '44.20,33.45,44.55,33.20';
@@ -739,11 +739,13 @@ const PANELS = {
       <div class="chips" id="lsort" style="margin-bottom:6px">
         <button class="chip on" data-v="recent">الأحدث</button><button class="chip" data-v="near">الأقرب لي</button>
         <button class="chip" data-v="todo">مباني حفاظ ما زرناها</button>
+        <button class="chip" data-v="photos">📷 الصور</button>
       </div>
       <div id="lres"></div>`, body => {
       let mode = 'recent';
       const draw = async () => {
         const q = $('#lq', body).value.trim();
+        if (mode === 'photos') return drawGallery($('#lres', body), q);
         const items = mode === 'todo' ? todoHeritage() : listItems();
         let arr = items.filter(it => !q || (it.title + ' ' + it.search).includes(q));
         if (mode === 'near' || mode === 'todo') { if (!S.me) toast('شغّل الـ GPS حتى نرتب حسب القرب'); arr.sort((a, b) => (a.dist ?? 1e9) - (b.dist ?? 1e9)); }
@@ -759,6 +761,10 @@ const PANELS = {
       $('#lq', body).oninput = draw;
       $('#lsort', body).onclick = e => { const b = e.target.closest('.chip'); if (!b) return; mode = b.dataset.v; $$('#lsort .chip', body).forEach(x => x.classList.toggle('on', x === b)); draw(); };
       $('#lres', body).onclick = e => {
+        const ph = e.target.closest('[data-gph]');
+        if (ph) { const g = GALLERY_GROUPS[+ph.dataset.g]; return openGallery(g.ids, +ph.dataset.i); }
+        const go = e.target.closest('[data-ggo]');
+        if (go) { closeSheet(); return GALLERY_GROUPS[+go.dataset.ggo].go(); }
         const k = e.target.closest('[data-open]')?.dataset.open; if (!k) return;
         if (S.geoIndex.has(k) || isHP(k)) { flyToBuilding(k); openRecord(k); }
         else { flyToFeature(k); openFeature(k); }
@@ -783,11 +789,15 @@ const PANELS = {
       <div class="row" style="margin-top:8px"><button class="btn" id="imp">استيراد ملف ZIP / GeoJSON</button></div>
       <h3>☁️ المزامنة السحابية (Google Drive)</h3>
       <p class="muted" id="cloudStatus" style="margin-top:0">${cloudStatusHtml()}</p>
-      <label class="f"><span>رابط السكربت (Web app URL)</span><input id="cUrl" dir="ltr" placeholder="https://script.google.com/macros/s/…/exec" value="${esc(cloudCfg().url)}"></label>
-      <label class="f"><span>كلمة السر (SYNC_KEY)</span><input id="cKey" dir="ltr" type="password" value="${esc(cloudCfg().key)}"></label>
-      <div class="row"><button class="btn primary" id="cTest">حفظ واختبار</button><button class="btn" id="cNow">زامن هسه</button></div>
+      <div class="row"><button class="btn primary" id="cTest">فحص الاتصال</button><button class="btn" id="cNow">زامن هسه</button></div>
+      <details class="howto"><summary>إعدادات متقدمة</summary>
+        <label class="f" style="margin-top:8px"><span>رابط السكربت (Web app URL)</span><input id="cUrl" dir="ltr" value="${esc(cloudCfg().url)}"></label>
+        <label class="f"><span>كلمة السر (إذا السكربت مقفول)</span><input id="cKey" dir="ltr" type="password" value="${esc(cloudCfg().key === 'open' ? '' : cloudCfg().key)}"></label>
+      </details>
       ${cloudOn() ? '<div class="row" style="margin-top:8px"><button class="btn" id="cInvite">إرسال رابط المزامنة للفريق</button></div>' : ''}
-      <details class="howto"><summary>شلون أفعّلها؟ (مرة وحدة، 3 دقايق، مجاناً)</summary>
+      <details class="howto"><summary>شلون تشتغل؟</summary>
+        <p>كل صورة تصوّرونها تنرفع تلقائياً لـ Google Drive الفريق، بمجلد باسم المبنى، واسم الملف بيه التاريخ واسم المصوّر. وكل تلفون يسحب صور وسجلات الباقين ويعرضها بالخريطة وبـ «السجل ← 📷 الصور». ماكو أي إعداد — بس افتحوا الموقع.</p>
+        <p style="margin-bottom:0">لإعداد سكربت جديد بحساب ثاني:</p>
         <ol>
           <li>افتح <a href="https://script.google.com/home/projects/create" target="_blank" rel="noopener">script.google.com</a> بحساب Google (حساب الجامعة إذا مساحته أكبر).</li>
           <li>امسح الموجود والصق كود <a href="https://github.com/mhmdTaqi-code/maps/blob/main/cloud/Code.gs" target="_blank" rel="noopener">Code.gs</a>.</li>
@@ -823,8 +833,8 @@ const PANELS = {
       $('#wipe', body).onclick = wipeAll;
       storageInfo($('#storageInfo', body));
       $('#cTest', body).onclick = async e => {
-        const c = cloudCfg(); c.url = $('#cUrl', body).value.trim(); c.key = $('#cKey', body).value.trim();
-        if (!/^https:\/\//.test(c.url) || !c.key) return toast('اكتب الرابط وكلمة السر');
+        const c = cloudCfg(); c.url = $('#cUrl', body).value.trim() || TEAM_CLOUD_URL; c.key = $('#cKey', body).value.trim() || 'open';
+        if (!/^https:\/\//.test(c.url)) return toast('الرابط غير صالح');
         await saveSettings(); e.target.disabled = true; $('#cloudStatus', body).textContent = '⏳ جاري الاختبار…';
         try {
           const j = await cloudCall({ action: 'ping' }, 30000);
@@ -849,6 +859,36 @@ const PANELS = {
 function applyTheme() {
   const t = S.settings.theme;
   if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; else delete document.documentElement.dataset.theme;
+}
+
+// ---------------------------------------------------------------- gallery: all photos of the team, per building
+let GALLERY_GROUPS = [];
+function galleryGroups() {
+  const out = [];
+  for (const r of S.heritage.values()) if ((r.photos || []).length && (isHP(r.id) || S.geoIndex?.has(r.id)))
+    out.push({ title: buildingTitle(r.id, r), sub: isHP(r.id) ? `مبنى حفاظ ${r.id}` : `مبنى ${r.id}`, ids: r.photos, updated: r.updated || '', go: () => { flyToBuilding(r.id); openRecord(r.id); } });
+  for (const f of S.features.values()) if ((f.properties.photos || []).length) {
+    const p = f.properties, cat = catOf(p.kind, p.category)[1];
+    out.push({ title: p.name || cat, sub: cat, ids: p.photos, updated: p.updated || '', go: () => { flyToFeature(p.id); openFeature(p.id); } });
+  }
+  return out.sort((a, b) => b.updated.localeCompare(a.updated));
+}
+async function drawGallery(el, q) {
+  GALLERY_GROUPS = galleryGroups().filter(g => !q || (g.title + ' ' + g.sub).includes(q));
+  const total = GALLERY_GROUPS.reduce((a, g) => a + g.ids.length, 0);
+  if (!total) { el.innerHTML = '<p class="muted">ماكو صور بعد. صوّروا المباني من بطاقاتها — وتطلع هنا صور كل الفريق.</p>'; return; }
+  el.innerHTML = `<p class="muted" style="margin:4px 0 10px">${total} صورة بـ ${GALLERY_GROUPS.length} مكان — من كل الفريق</p>` + GALLERY_GROUPS.map((g, gi) => `
+    <div class="gal-group">
+      <div class="gal-head"><div><b>${esc(g.title)}</b><small>${esc(g.sub)} · ${g.ids.length} صورة</small></div><button class="btn small" data-ggo="${gi}">روح له</button></div>
+      <div class="gal-strip">${g.ids.map((id, i) => `<button class="gal-ph" data-gph="${esc(id)}" data-g="${gi}" data-i="${i}" aria-label="صورة"></button>`).join('')}</div>
+    </div>`).join('');
+  // thumbnails load as they scroll into view (teammates' photos come from Drive the first time)
+  const io = new IntersectionObserver(es => es.forEach(async en => {
+    if (!en.isIntersecting) return; io.unobserve(en.target);
+    const u = await photoUrl(en.target.dataset.gph);
+    if (u) en.target.style.backgroundImage = `url(${u})`; else en.target.classList.add('missing');
+  }), { root: el.closest('.sheet-body'), rootMargin: '200px' });
+  $$('.gal-ph', el).forEach(b => io.observe(b));
 }
 
 // ---------------------------------------------------------------- feature records
@@ -1668,7 +1708,13 @@ async function teamFromLink() {
 // Photos are uploaded once (sequentially, resumable), records are pushed when they change and pulled
 // from teammates. Remote photos are fetched on demand through the script and kept on the device.
 const CLOUD = { busy: false, timer: null, debounce: null, state: '', err: '', up: 0, upTotal: 0, lastOk: 0 };
-const cloudCfg = () => (S.settings.cloud ||= { url: '', key: '', lastPull: '', lastPush: '' });
+// the team's Apps Script (cloud/Code.gs, open access): every visitor syncs with it automatically
+const TEAM_CLOUD_URL = 'https://script.google.com/macros/s/AKfycbzabFq7IVXtCGArW3T26G8PnlX5bmAh7XYpk89QOR5iO_bs-wsRCfCAgQZvgE8p8a-0gA/exec';
+const cloudCfg = () => {
+  const c = (S.settings.cloud ||= { url: '', key: '', lastPull: '', lastPush: '' });
+  if (!c.url) { c.url = TEAM_CLOUD_URL; c.key = c.key || 'open'; }
+  return c;
+};
 const cloudOn = () => { const c = cloudCfg(); return !!(c.url && c.key); };
 async function cloudCall(body, timeoutMs = 60000) {
   const c = cloudCfg();
@@ -1698,8 +1744,8 @@ function updateCloudBadge() {
 // which record owns a photo → its Drive sub-folder ("HP20 خان مرجان الاثري")
 function photoOwners() {
   const m = new Map();
-  for (const f of S.features.values()) for (const ph of f.properties.photos || []) m.set(ph, `${f.properties.name || catOf(f.properties.kind, f.properties.category)[1]} (${f.properties.id})`);
-  for (const r of S.heritage.values()) for (const ph of r.photos || []) m.set(ph, `${r.id} ${buildingTitle(r.id, r)}`);
+  for (const f of S.features.values()) for (const ph of f.properties.photos || []) m.set(ph, { id: f.properties.id, name: f.properties.name || catOf(f.properties.kind, f.properties.category)[1] });
+  for (const r of S.heritage.values()) for (const ph of r.photos || []) m.set(ph, { id: r.id, name: buildingTitle(r.id, r) });
   return m;
 }
 
@@ -1723,7 +1769,7 @@ async function cloudSync() {
     CLOUD.upTotal = pending.length; CLOUD.up = 0;
     for (const p of pending) {
       if (!navigator.onLine) throw new Error('انقطع النت');
-      const j = await cloudCall({ action: 'putPhoto', id: p.id, mime: p.blob.type || 'image/jpeg', data: await blobToB64(p.blob), owner: owners.get(p.id) || '',
+      const j = await cloudCall({ action: 'putPhoto', id: p.id, mime: p.blob.type || 'image/jpeg', data: await blobToB64(p.blob), ownerId: owners.get(p.id)?.id || '', ownerName: owners.get(p.id)?.name || '',
         meta: { created: p.created, observer: p.observer, lat: p.lat, lng: p.lng, name: p.name } }, 120000);
       p.cloud = j.fileId; await DB.put('photos', p);
       CLOUD.up++; setCloudState('sync');
@@ -1741,7 +1787,7 @@ async function cloudSync() {
     }
     for (const ph of j.photos) {
       const cur = await DB.get('photos', ph.id);
-      if (!cur) await DB.put('photos', { id: ph.id, cloud: ph.fileId, remote: true, created: ph.created });
+      if (!cur) await DB.put('photos', { id: ph.id, cloud: ph.fileId, remote: true, created: ph.created, observer: ph.observer });
       else if (!cur.cloud) { cur.cloud = ph.fileId; await DB.put('photos', cur); }
     }
     c.lastPull = j.now; await saveSettings();

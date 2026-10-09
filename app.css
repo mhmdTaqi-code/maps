@@ -319,3 +319,11 @@ details.howto { background: var(--panel-2); border-radius: 12px; padding: 8px 12
 details.howto summary { cursor: pointer; font-weight: 600; }
 details.howto ol { padding-inline-start: 18px; margin: 8px 0; }
 details.howto code { background: var(--panel); padding: 0 4px; border-radius: 4px; }
+
+/* ---------- gallery ---------- */
+.gal-group { padding: 10px 0; border-bottom: 1px solid var(--line); }
+.gal-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.gal-head b { display: block; font-size: 14px; } .gal-head small { color: var(--ink-2); font-size: 12px; }
+.gal-strip { display: flex; gap: 6px; overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 4px; }
+.gal-ph { flex: 0 0 96px; height: 96px; border: 0; border-radius: 10px; background: var(--panel-2) center/cover; cursor: zoom-in; }
+.gal-ph.missing { background: repeating-linear-gradient(45deg, var(--panel-2) 0 8px, var(--line) 8px 16px); }

@@ -1,29 +1,41 @@
 /**
  * Team cloud for «مسح السايت» (https://mhmdtaqi.me/maps) — free, runs in your own Google account.
  *
- * Photos go to a Google Drive folder, survey records to a Google Sheet in the same folder.
- * Setup (once, ~3 minutes):
+ * Photos go to a Google Drive folder (one sub-folder per building), survey records and a readable
+ * photo index go to a Google Sheet in the same folder. The app reads everything back through this
+ * script, so every teammate sees everyone's photos.
+ *
+ * Setup (once):
  *   1. https://script.google.com → New project → paste this whole file.
- *   2. Deploy → New deployment → type "Web app" → Execute as: Me → Who has access: Anyone → Deploy
- *      → authorise with your Google account.
- *   3. Paste the Web app URL (…/exec) into WEBAPP_URL below, save, select the function `setup` → Run. It creates the Drive folder + sheet and a random secret key,
- *      and writes the team JOIN LINK into the sheet's «الإعداد» tab (and the execution log).
- *   4. Open the join link on your phone and send it to the team — the app configures itself.
- * Nothing is public: requests without the key are refused, and the photos stay private in your Drive
- * (the app fetches them through this script). Run `rotateKey` to revoke access and get a new link.
+ *   2. Deploy → New deployment → "Web app" → Execute as: Me → Who has access: Anyone → Deploy → authorise.
+ *   3. Put the …/exec URL in the app (TEAM_CLOUD_URL in app.js) — every visitor then syncs automatically.
+ *   4. Optional: run `setup` once to create the folder/sheet right away.
+ * Updating this code later: Deploy → Manage deployments → ✏️ → Version: New version → Deploy (URL stays the same).
+ *
+ * Access: OPEN_ACCESS = true means anyone who has the site can upload — the site is the team's.
+ * Protections either way: only images, max size per photo, a daily cap per device, and reads are limited
+ * to the survey photos this script stored (nothing else in your Drive can be fetched).
+ * For a password instead, set OPEN_ACCESS = false and run `setup` (creates a key + join link).
  */
+const OPEN_ACCESS = true;
 const APP_URL = 'https://mhmdtaqi.me/maps/';
-const WEBAPP_URL = '';   // ← after deploying, paste the Web app URL here (…/exec), then run setup
+const WEBAPP_URL = '';                                // only needed for the join link when OPEN_ACCESS = false
 const ROOT_NAME = 'مسح السايت — الرصافة القديمة';
 const MAX_CELL = 45000;                             // Sheets cell limit is 50,000 characters
+const MAX_PHOTO_B64 = 6 * 1024 * 1024;               // ≈ 4.5 MB per photo (the app sends ≈ 0.3 MB)
+const DAILY_PHOTOS_PER_DEVICE = 1500;
+const PHOTO_COLS = ['photoId', 'fileId', 'owner', 'created', 'device', 'synced', 'bytes', 'observer', 'lat', 'lng', 'link', 'name'];
 
-function doGet() { return out({ ok: true, service: 'site-survey-cloud', version: 1 }); }
+function doGet() { return out({ ok: true, service: 'site-survey-cloud', version: 2, open: OPEN_ACCESS }); }
 
 function doPost(e) {
   let req;
   try { req = JSON.parse(e.postData.contents); } catch (err) { return out({ ok: false, error: 'bad request' }); }
-  const k = props().getProperty('SYNC_KEY');
-  if (!req || !k || req.key !== k) return out({ ok: false, error: 'bad key' });
+  if (!req) return out({ ok: false, error: 'bad request' });
+  if (!OPEN_ACCESS) {
+    const k = props().getProperty('SYNC_KEY');
+    if (!k || req.key !== k) return out({ ok: false, error: 'bad key' });
+  }
   try {
     switch (req.action) {
       case 'ping': return out(ping());
@@ -44,6 +56,7 @@ function withLock(fn) {
   try { return fn(); } finally { lock.releaseLock(); }
 }
 function now() { return new Date().toISOString(); }
+const clean = s => String(s || '').replace(/[\\/:*?"<>|#\n\r\t]+/g, ' ').replace(/\s+/g, ' ').trim();
 
 // ---- storage locations (created on first use, ids remembered)
 function props() { return PropertiesService.getScriptProperties(); }
@@ -57,22 +70,34 @@ function photosFolder() {
   if (id) { try { return DriveApp.getFolderById(id); } catch (e) {} }
   const f = root().createFolder('الصور'); props().setProperty('PHOTOS', f.getId()); return f;
 }
-function folderFor(owner) {             // one sub-folder per building / record, e.g. "HP20 خان مرجان"
-  const name = String(owner || 'بدون مبنى').slice(0, 80), cache = CacheService.getScriptCache(), k = 'dir:' + name;
-  const hit = cache.get(k);
-  if (hit) { try { return DriveApp.getFolderById(hit); } catch (e) {} }
-  const parent = photosFolder(), it = parent.getFoldersByName(name);
-  const f = it.hasNext() ? it.next() : parent.createFolder(name);
-  cache.put(k, f.getId(), 21600); return f;
+// one sub-folder per building / record, keyed by its id so a later rename keeps the same folder:
+// "HP20 — خان مرجان الاثري", "F7k2… — مدخل الخان"
+function folderFor(ownerId, ownerName) {
+  const id = clean(ownerId) || 'بدون-مبنى', name = clean(ownerName ? `${id} — ${ownerName}` : id).slice(0, 100);
+  const p = props(), key = 'DIR_' + id.slice(0, 60);
+  const known = p.getProperty(key);
+  if (known) {
+    try { const f = DriveApp.getFolderById(known); if (f.getName() !== name) f.setName(name); return f; } catch (e) {}
+  }
+  const f = photosFolder().createFolder(name);
+  p.setProperty(key, f.getId()); return f;
 }
 function book() {
   const id = props().getProperty('SHEET');
-  if (id) { try { return SpreadsheetApp.openById(id); } catch (e) {} }
-  const ss = SpreadsheetApp.create('سجل الرصد — ' + ROOT_NAME);
-  DriveApp.getFileById(ss.getId()).moveTo(root());
-  const r = ss.getSheets()[0]; r.setName('records'); r.appendRow(['id', 'store', 'updated', 'device', 'synced', 'json']); r.setFrozenRows(1);
-  const p = ss.insertSheet('photos'); p.appendRow(['photoId', 'fileId', 'owner', 'created', 'device', 'synced', 'bytes']); p.setFrozenRows(1);
-  props().setProperty('SHEET', ss.getId()); return ss;
+  let ss = null;
+  if (id) { try { ss = SpreadsheetApp.openById(id); } catch (e) {} }
+  if (!ss) {
+    ss = SpreadsheetApp.create('سجل الرصد — ' + ROOT_NAME);
+    DriveApp.getFileById(ss.getId()).moveTo(root());
+    const r = ss.getSheets()[0]; r.setName('records'); r.appendRow(['id', 'store', 'updated', 'device', 'synced', 'json']); r.setFrozenRows(1);
+    ss.insertSheet('photos');
+    props().setProperty('SHEET', ss.getId());
+  }
+  const ph = ss.getSheetByName('photos') || ss.insertSheet('photos');
+  if (ph.getRange(1, PHOTO_COLS.length).getValue() !== PHOTO_COLS[PHOTO_COLS.length - 1]) {   // header (v1 had fewer columns)
+    ph.getRange(1, 1, 1, PHOTO_COLS.length).setValues([PHOTO_COLS]); ph.setFrozenRows(1);
+  }
+  return ss;
 }
 function columnMap(sh) {                 // id (column A) -> row number
   const n = sh.getLastRow(), m = {};
@@ -84,24 +109,36 @@ function columnMap(sh) {                 // id (column A) -> row number
 
 function ping() {
   const ss = book(), photos = Math.max(0, ss.getSheetByName('photos').getLastRow() - 1), records = Math.max(0, ss.getSheetByName('records').getLastRow() - 1);
-  return { ok: true, folder: root().getUrl(), sheet: ss.getUrl(), photos: photos, records: records,
+  return { ok: true, open: OPEN_ACCESS, folder: root().getUrl(), sheet: ss.getUrl(), photos: photos, records: records,
            used: DriveApp.getStorageUsed(), limit: DriveApp.getStorageLimit(), now: now() };
 }
 
 // ---- photos: idempotent upload (same photoId twice = same file)
 function putPhoto(req) {
   if (!req.id || !req.data) return { ok: false, error: 'missing photo' };
+  if (String(req.data).length > MAX_PHOTO_B64) return { ok: false, error: 'photo too large' };
   const sh = book().getSheetByName('photos');
-  const found = sh.getRange('A:A').createTextFinder(req.id).matchEntireCell(true).findNext();
+  const found = sh.getRange('A:A').createTextFinder(String(req.id)).matchEntireCell(true).findNext();
   if (found) return { ok: true, fileId: sh.getRange(found.getRow(), 2).getValue(), existed: true };
+  // daily cap per device so a runaway phone (or a stranger) cannot fill the Drive
+  const day = now().slice(0, 10), cache = CacheService.getScriptCache(), qk = 'q:' + clean(req.device).slice(0, 40) + ':' + day;
+  const used = Number(cache.get(qk) || 0);
+  if (used >= DAILY_PHOTOS_PER_DEVICE) return { ok: false, error: 'daily limit reached' };
   const mime = req.mime === 'image/webp' ? 'image/webp' : 'image/jpeg';
-  const blob = Utilities.newBlob(Utilities.base64Decode(req.data), mime, req.id + (mime === 'image/webp' ? '.webp' : '.jpg'));
-  const file = folderFor(req.owner).createFile(blob);
-  file.setDescription(JSON.stringify(req.meta || {}));
-  withLock(() => sh.appendRow([req.id, file.getId(), req.owner || '', (req.meta && req.meta.created) || '', req.device || '', now(), blob.getBytes().length]));
+  const bytes = Utilities.base64Decode(req.data);
+  const m = req.meta || {}, when = String(m.created || now()).slice(0, 16).replace('T', '_').replace(':', '');
+  const fname = clean(`${when}_${m.observer || 'مجهول'}_${req.id}`) + (mime === 'image/webp' ? '.webp' : '.jpg');
+  const file = folderFor(req.ownerId || req.owner, req.ownerName).createFile(Utilities.newBlob(bytes, mime, fname));
+  file.setDescription(JSON.stringify(m));
+  withLock(() => sh.appendRow([req.id, file.getId(), clean(req.ownerName || req.owner), m.created || '', req.device || '', now(), bytes.length,
+                               clean(m.observer), m.lat || '', m.lng || '', file.getUrl(), clean(m.name)]));
+  cache.put(qk, String(used + 1), 90000);
   return { ok: true, fileId: file.getId() };
 }
+// only files this script stored as survey photos can be read back
 function getPhoto(req) {
+  const sh = book().getSheetByName('photos');
+  if (!req.fileId || !sh.getRange('B:B').createTextFinder(String(req.fileId)).matchEntireCell(true).findNext()) return { ok: false, error: 'not a survey photo' };
   const f = DriveApp.getFileById(req.fileId);
   let blob = null;
   if (req.thumb) { try { blob = f.getThumbnail(); } catch (e) {} }
@@ -113,7 +150,7 @@ function getPhoto(req) {
 function putRecords(req) {
   const sh = book().getSheetByName('records'), rows = columnMap(sh), t = now();
   let written = 0;
-  (req.records || []).forEach(function (r) {
+  (req.records || []).slice(0, 100).forEach(function (r) {
     if (!r || !r.id) return;
     let json = JSON.stringify(r.data);
     if (json.length > MAX_CELL) {      // very long GPS tracks: keep the record in a Drive file
@@ -143,28 +180,27 @@ function pull(req) {
     records.push({ id: v[0], store: v[1], updated: v[2], device: v[3], data: data });
   });
   const phSh = ss.getSheetByName('photos'), m = phSh.getLastRow(), photos = [];
-  if (m > 1) phSh.getRange(2, 1, m - 1, 6).getValues().forEach(function (v) {
-    if (String(v[5]) > since) photos.push({ id: v[0], fileId: v[1], owner: v[2], created: v[3], device: v[4] });
+  if (m > 1) phSh.getRange(2, 1, m - 1, PHOTO_COLS.length).getValues().forEach(function (v) {
+    if (String(v[5]) > since) photos.push({ id: v[0], fileId: v[1], owner: v[2], created: v[3], device: v[4], observer: v[7] });
   });
   return { ok: true, records: records, photos: photos, now: t };
 }
 
-// ---- setup: random key + join link (run from the editor after deploying)
+// ---- setup (run from the editor): creates folder + sheet; with OPEN_ACCESS = false also a key + join link
 function setup() {
-  const p = props();
-  if (!p.getProperty('SYNC_KEY')) p.setProperty('SYNC_KEY', Utilities.getUuid().replace(/-/g, '') + Utilities.getUuid().replace(/-/g, '').slice(0, 12));
-  const ss = book(); root();
-  // ScriptApp.getService().getUrl() can return the editor's test deployment, which teammates cannot use,
-  // so the published …/exec address is pasted into WEBAPP_URL above
-  const url = WEBAPP_URL;
-  if (!/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec$/.test(url)) throw new Error('الصق رابط الـ Web app (ينتهي بـ /exec) بـ WEBAPP_URL فوق');
-  const link = APP_URL + '#cloud=' + encodeURIComponent(url) + '~' + p.getProperty('SYNC_KEY');
+  const ss = book(), dir = root(); photosFolder();
   let sh = ss.getSheetByName('الإعداد'); if (!sh) sh = ss.insertSheet('الإعداد');
   sh.clear();
-  sh.getRange(1, 1, 4, 1).setValues([['رابط الانضمام للمزامنة — افتحه بالتلفون ودزّه للفريق بس (بيه كلمة السر):'], [link], ['المجلد: ' + root().getUrl()], ['لإلغاء الوصول القديم: شغّل rotateKey من السكربت وخذ الرابط الجديد من هنا.']]);
-  sh.setColumnWidth(1, 900);
-  Logger.log('JOIN LINK: ' + link);
-  Logger.log('SHEET: ' + ss.getUrl());
-  return link;
+  const rows = [['مجلد الرصد: ' + dir.getUrl()], ['التطبيق: ' + APP_URL]];
+  if (OPEN_ACCESS) {
+    rows.push(['الوضع: مفتوح — أي واحد يفتح التطبيق يرفع ويشوف صور الفريق تلقائياً.']);
+  } else {
+    const p = props();
+    if (!p.getProperty('SYNC_KEY')) p.setProperty('SYNC_KEY', Utilities.getUuid().replace(/-/g, '') + Utilities.getUuid().replace(/-/g, '').slice(0, 12));
+    if (!/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec$/.test(WEBAPP_URL)) throw new Error('الصق رابط الـ Web app (ينتهي بـ /exec) بـ WEBAPP_URL فوق');
+    rows.push(['رابط الانضمام (بيه كلمة السر — للفريق بس):'], [APP_URL + '#cloud=' + encodeURIComponent(WEBAPP_URL) + '~' + p.getProperty('SYNC_KEY')]);
+  }
+  sh.getRange(1, 1, rows.length, 1).setValues(rows); sh.setColumnWidth(1, 900);
+  Logger.log('FOLDER: ' + dir.getUrl()); Logger.log('SHEET: ' + ss.getUrl());
 }
 function rotateKey() { props().deleteProperty('SYNC_KEY'); return setup(); }
