@@ -3,7 +3,7 @@
 'use strict';
 
 // ---------------------------------------------------------------- constants
-const DATA_VERSION = '17';    // bump when files in data/ change (also in sw.js)
+const DATA_VERSION = '19';    // bump when files in data/ change (also in sw.js)
 const SITE_CENTER = [33.3387, 44.3935];
 const SITE_ZOOM = 17;
 const BAGHDAD_VIEWBOX = '44.20,33.45,44.55,33.20';
@@ -1338,6 +1338,251 @@ function setAppMode(mode) {
 }
 $$('.modes button').forEach(b => b.onclick = () => { closeSheet(); setAppMode(b.dataset.mode); });
 
+
+// ---------------------------------------------------------------- team: live locations of friends
+// No server of our own: positions go through free public MQTT brokers (several at once, so a network
+// that blocks one port still gets through another). Everything is end-to-end encrypted with a key
+// derived from the team code (AES-GCM); the broker only sees an opaque topic hash and ciphertext.
+// Sharing is opt-in per person; stopping clears the retained position from the brokers.
+const BROKERS = [
+  { name: 'shiftr', url: 'wss://public.cloud.shiftr.io:443', opts: { username: 'public', password: 'public' } },
+  { name: 'mosquitto', url: 'wss://test.mosquitto.org:8081' },
+  { name: 'emqx', url: 'wss://broker.emqx.io:8084/mqtt' },
+  { name: 'hivemq', url: 'wss://broker.hivemq.com:8884/mqtt' },
+];
+const MQTT_SRC = 'https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js';
+const TEAM_COLORS = ['#e6194b', '#3cb44b', '#4363d8', '#f58231', '#911eb4', '#42d4f4', '#f032e6', '#bfef45', '#469990', '#9a6324'];
+const TEAM = { code: null, key: null, topic: null, clients: [], up: new Set(), members: new Map(), lastSent: 0, lastPos: null, beat: null, tick: null };
+L_.team = L.featureGroup();
+map.createPane('teamPane').style.zIndex = 660;
+
+// one id per installed app (sessionStorage override lets two tabs act as two people when testing)
+const deviceId = (() => {
+  try {
+    const o = sessionStorage.getItem('ssm-device'); if (o) return o;
+    let d = localStorage.getItem('ssm-device'); if (!d) { d = 'D' + crypto.getRandomValues(new Uint32Array(2)).join('').slice(0, 14); localStorage.setItem('ssm-device', d); }
+    return d;
+  } catch { return uid('D'); }
+})();
+const myColor = () => TEAM_COLORS[[...deviceId].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7) % TEAM_COLORS.length];
+const teamSettings = () => (S.settings.team ||= { code: null, sharing: false, viewing: true });
+const normCode = c => (c || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+function newTeamCode() {
+  const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789', r = crypto.getRandomValues(new Uint8Array(10));
+  const s = [...r].map(b => A[b % A.length]).join(''); return s.slice(0, 5) + '-' + s.slice(5);
+}
+
+// ---- crypto
+const b64 = u8 => btoa(String.fromCharCode(...u8));
+const unb64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+async function teamKeys(code) {
+  const enc = new TextEncoder(), c = normCode(code);
+  const base = await crypto.subtle.importKey('raw', enc.encode(c), 'PBKDF2', false, ['deriveKey']);
+  const key = await crypto.subtle.deriveKey({ name: 'PBKDF2', salt: enc.encode('ssm-team-v1'), iterations: 150000, hash: 'SHA-256' },
+    base, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+  const h = new Uint8Array(await crypto.subtle.digest('SHA-256', enc.encode('ssm-topic:' + c)));
+  return { key, topic: 'ssm-rusafa/' + [...h.slice(0, 12)].map(b => b.toString(16).padStart(2, '0')).join('') };
+}
+async function seal(obj) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, TEAM.key, new TextEncoder().encode(JSON.stringify(obj))));
+  const out = new Uint8Array(12 + ct.length); out.set(iv); out.set(ct, 12); return b64(out);
+}
+async function unseal(s) {
+  const u = unb64(s);
+  const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: u.slice(0, 12) }, TEAM.key, u.slice(12));
+  return JSON.parse(new TextDecoder().decode(pt));
+}
+
+// ---- connection
+let mqttLib;
+function loadMqtt() {
+  return mqttLib || (mqttLib = new Promise((res, rej) => {
+    const sc = document.createElement('script'); sc.src = MQTT_SRC;
+    sc.onload = () => res(window.mqtt); sc.onerror = () => { mqttLib = null; rej(new Error('mqtt')); };
+    document.head.appendChild(sc);
+  }));
+}
+function teamDisconnect() {
+  for (const c of TEAM.clients) { try { c.end(true); } catch {} }
+  TEAM.clients = []; TEAM.up.clear(); updateTeamBadge();
+}
+async function teamConnect() {
+  const ts = teamSettings();
+  teamDisconnect();
+  if (!ts.code) return;
+  if (!window.crypto?.subtle) { toast('مشاركة الموقع تحتاج رابط آمن (https)'); return; }
+  let mq;
+  try { mq = await loadMqtt(); } catch { toast('تعذّر تحميل أداة الاتصال — تأكد من النت'); return; }
+  Object.assign(TEAM, await teamKeys(ts.code), { code: normCode(ts.code) });
+  const myTopic = `${TEAM.topic}/${deviceId}`;
+  // if the phone drops off, brokers tell the team (last will) instead of showing a frozen dot
+  const will = ts.sharing ? { topic: myTopic, payload: await seal({ off: 1, n: S.settings.observer, t: Date.now() }), qos: 0, retain: true } : undefined;
+  for (const b of BROKERS) {
+    const c = mq.connect(b.url, { ...(b.opts || {}), clientId: `ssm_${deviceId}_${Math.random().toString(36).slice(2, 6)}`, clean: true,
+      connectTimeout: 10000, reconnectPeriod: 10000, keepalive: 30, will });
+    c.on('connect', () => { TEAM.up.add(b.name); c.subscribe(`${TEAM.topic}/+`, { qos: 0 }); updateTeamBadge(); if (ts.sharing) teamPublish(true); });
+    c.on('close', () => { TEAM.up.delete(b.name); updateTeamBadge(); });
+    c.on('error', () => {});
+    c.on('message', (topic, payload) => onTeamMessage(topic, payload));
+    TEAM.clients.push(c);
+  }
+  clearInterval(TEAM.beat); TEAM.beat = setInterval(() => teamPublish(true), 30000);
+  clearInterval(TEAM.tick); TEAM.tick = setInterval(renderTeam, 15000);
+}
+async function onTeamMessage(topic, payload) {
+  const id = topic.split('/').pop();
+  if (id === deviceId) return;
+  const s = payload.toString();
+  if (!s) { TEAM.members.delete(id); renderTeam(); return; }                 // member stopped sharing
+  let m; try { m = await unseal(s); } catch { return; }                       // not our team / tampered
+  const cur = TEAM.members.get(id);
+  // last will ("connection dropped"): its timestamp is from when that phone connected, so it is older than
+  // the positions sent since — apply it to the last known position instead of comparing times
+  if (m.off) { if (cur && !cur.off) { cur.off = true; cur.offAt = Date.now(); renderTeam(); } return; }
+  if (cur && cur.t >= m.t && !cur.off) return;                                 // same message via another broker
+  TEAM.members.set(id, { ...m, id, off: false });
+  renderTeam();
+}
+async function teamPublish(force) {
+  const ts = teamSettings();
+  if (!ts.sharing || !S.me || !TEAM.key || !TEAM.up.size) return;
+  const now = Date.now();
+  const moved = TEAM.lastPos ? map.distance(TEAM.lastPos, [S.me.lat, S.me.lng]) : Infinity;
+  if (!force && (now - TEAM.lastSent < 5000 || (moved < 8 && now - TEAM.lastSent < 30000))) return;
+  TEAM.lastSent = now; TEAM.lastPos = [S.me.lat, S.me.lng];
+  const msg = await seal({ n: S.settings.observer || 'بدون اسم', c: myColor(), la: +S.me.lat.toFixed(6), lo: +S.me.lng.toFixed(6),
+    a: Math.round(S.me.acc), h: S.me.heading != null ? Math.round(S.me.heading) : null, t: now });
+  for (const c of TEAM.clients) if (c.connected) c.publish(`${TEAM.topic}/${deviceId}`, msg, { qos: 0, retain: true });
+}
+async function teamStopSharing() {
+  // clear our retained position so nobody sees a stale dot, then reconnect without a last will
+  for (const c of TEAM.clients) if (c.connected) c.publish(`${TEAM.topic}/${deviceId}`, '', { qos: 0, retain: true });
+  await new Promise(r => setTimeout(r, 400));
+}
+
+// ---- map
+function agoTxt(t) {
+  const s = (Date.now() - t) / 1000;
+  return s < 45 ? 'هسه' : s < 3600 ? `قبل ${Math.round(s / 60)} د` : `قبل ${Math.round(s / 3600)} س`;
+}
+const initials = n => (n || '؟').trim().split(/\s+/).map(w => w[0]).slice(0, 2).join('');
+function renderTeam() {
+  L_.team.clearLayers();
+  const ts = teamSettings();
+  for (const [id, m] of TEAM.members) {
+    const age = (Date.now() - m.t) / 1000;
+    if (age > 6 * 3600) { TEAM.members.delete(id); continue; }
+    if (!ts.viewing || m.la == null) continue;
+    const stale = m.off || age > 120, cls = `mate${stale ? ' stale' : ''}`;
+    if (!stale && m.a && m.a < 80) L.circle([m.la, m.lo], { radius: m.a, color: m.c, weight: 1, fillColor: m.c, fillOpacity: .08, interactive: false, pane: 'teamPane' }).addTo(L_.team);
+    const mk = L.marker([m.la, m.lo], { pane: 'teamPane', zIndexOffset: 900,
+      icon: L.divIcon({ className: '', html: `<div class="${cls}" style="--c:${m.c}">${m.h != null && !stale ? `<i class="mate-hd" style="transform:rotate(${m.h}deg)"></i>` : ''}<span>${esc(initials(m.n))}</span></div>`, iconSize: [30, 30], iconAnchor: [15, 15] }) });
+    mk.bindTooltip(`${esc(m.n)} · ${m.off ? 'انقطع ' + agoTxt(m.t) : agoTxt(m.t)}`, { permanent: true, direction: 'top', offset: [0, -16], className: 'lbl lbl-mate' });
+    mk.on('click', () => openTeam());
+    L_.team.addLayer(mk);
+  }
+  updateTeamBadge();
+  if (!$('#sheet').hidden && $('#sheet').dataset.panel === 'team') renderTeamList();
+}
+function updateTeamBadge() {
+  const st = $('#teamStatus');
+  if (st) st.innerHTML = TEAM.code ? (TEAM.up.size ? `<span class="dot-live"></span> متصل (${TEAM.up.size} من ${BROKERS.length} خوادم: ${[...TEAM.up].join('، ')})` : '⏳ جاري الاتصال…') : '';
+  const b = $('#btnTeam'); if (!b) return;
+  const live = [...TEAM.members.values()].filter(m => !m.off && Date.now() - m.t < 120000).length;   // fresh = < 2 min
+  b.classList.toggle('on', !!teamSettings().sharing);
+  b.dataset.count = live || '';
+  b.title = TEAM.code ? `الفريق — متصل بـ ${TEAM.up.size} خادم` : 'الفريق';
+}
+
+// ---- panel
+function renderTeamList() {
+  const el = $('#teamList'); if (!el) return;
+  const st = $('#teamStatus');
+  if (st) st.innerHTML = TEAM.code ? (TEAM.up.size ? `<span class="dot-live"></span> متصل (${TEAM.up.size} من ${BROKERS.length} خوادم: ${[...TEAM.up].join('، ')})` : '⏳ جاري الاتصال…') : '';
+  const arr = [...TEAM.members.values()].sort((a, b) => b.t - a.t);
+  el.innerHTML = arr.length ? arr.map(m => `<div class="list-item" data-mate="${esc(m.id)}">
+      <div class="thumb" style="background:${m.c}"><b style="color:#fff">${esc(initials(m.n))}</b></div>
+      <div class="meta"><b>${esc(m.n)}</b><small>${m.off ? 'انقطع الاتصال · آخر موقع ' + agoTxt(m.t) : agoTxt(m.t)}${m.a ? ` · دقة ±${m.a} م` : ''}</small></div>
+      ${S.me && m.la != null ? `<span class="dist">${fmtLen(map.distance([S.me.lat, S.me.lng], [m.la, m.lo]))}</span>` : ''}</div>`).join('')
+    : `<p class="muted">${TEAM.code ? 'ماكو أحد من الفريق مشارك موقعه هسه.' : ''}</p>`;
+}
+function openTeam() {
+  const ts = teamSettings();
+  const link = ts.code ? `${location.origin}${location.pathname}#team=${normCode(ts.code)}` : '';
+  openSheet('الفريق — مواقع الأصدقاء', ts.code ? `
+    <p class="muted" id="teamStatus" style="margin-top:0"></p>
+    <div class="team-code"><span>كود الفريق</span><b dir="ltr">${esc(ts.code)}</b></div>
+    <div class="row" style="margin:8px 0"><button class="btn primary" id="tShare">إرسال الكود للأصدقاء</button><button class="btn" id="tCopy">نسخ الرابط</button></div>
+    <label class="f"><span>اسمك (يشوفه الفريق)</span><input id="tName" value="${esc(S.settings.observer)}" placeholder="مثلاً: محمد تقي"></label>
+    ${swHtml('sharing', 'شارك موقعي مع الفريق', 'يشتغل والتطبيق مفتوح — قفل الشاشة يوقفه', ts.sharing, `background:${myColor()};border-radius:50%`)}
+    ${swHtml('viewing', 'اعرض الفريق على الخريطة', '', ts.viewing)}
+    <h3>الأعضاء</h3><div id="teamList"></div>
+    <hr><p class="muted">🔒 المواقع مشفّرة من التلفون للتلفون بكود الفريق — الخوادم العامة اللي تنقلها ما تكدر تقراها. أي واحد عنده الكود يشوف المواقع، فلا تنشروه برّه الفريق. لمن توقف المشاركة ينمسح موقعك.</p>
+    <button class="btn danger block" id="tLeave">مغادرة الفريق</button>` : `
+    <p class="muted" style="margin-top:0">شوفوا بعض على الخريطة وأنتم بالسايت. واحد يسوّي فريق ويدز الكود للباقين.</p>
+    <label class="f"><span>اسمك (يشوفه الفريق)</span><input id="tName" value="${esc(S.settings.observer)}" placeholder="مثلاً: محمد تقي"></label>
+    <button class="btn primary block" id="tNew">سوّي فريق جديد</button>
+    <h3>أو انضم لفريق</h3>
+    <label class="f"><input id="tCode" placeholder="الكود مثل: K7Q2M-XR4PA" dir="ltr" autocapitalize="characters"></label>
+    <button class="btn block" id="tJoin">انضم</button>`, body => {
+    $('#sheet').dataset.panel = 'team';
+    const nameOk = () => { const n = $('#tName', body).value.trim(); if (!n) { toast('اكتب اسمك أول'); $('#tName', body).focus(); return false; } S.settings.observer = n; saveSettings(); return true; };
+    $('#tName', body).onchange = () => { S.settings.observer = $('#tName', body).value.trim(); saveSettings(); if (ts.sharing) teamPublish(true); };
+    const join = async code => { if (!nameOk()) return; ts.code = code; ts.viewing = true; saveSettings(); await teamConnect(); openTeam(); };
+    if (!ts.code) {
+      $('#tNew', body).onclick = () => join(newTeamCode());
+      $('#tJoin', body).onclick = () => { const c = normCode($('#tCode', body).value); if (c.length < 8) return toast('الكود ناقص'); join(c.slice(0, 5) + '-' + c.slice(5)); };
+    } else {
+      renderTeamList();
+      $('#tShare', body).onclick = async () => {
+        const text = `انضم لفريق مسح السايت حتى نشوف مواقع بعض:\n${link}\nالكود: ${ts.code}`;
+        if (navigator.share) { try { await navigator.share({ title: 'فريق مسح السايت', text }); return; } catch (e) { if (e.name === 'AbortError') return; } }
+        try { await navigator.clipboard.writeText(text); toast('انسخ — الصقه بالكروب'); } catch { prompt('انسخ هذا وأرسله:', text); }
+      };
+      $('#tCopy', body).onclick = async () => { try { await navigator.clipboard.writeText(link); toast('انسخ الرابط'); } catch { prompt('الرابط:', link); } };
+      body.addEventListener('click', async e => {
+        const sw = e.target.closest('.switch');
+        if (sw) {
+          const k = sw.dataset.key;
+          if (k === 'sharing') {
+            if (!ts.sharing && !nameOk()) return;
+            if (ts.sharing) await teamStopSharing();
+            ts.sharing = !ts.sharing; saveSettings();
+            if (ts.sharing) { startGps(); toast('موقعك صار يطلع للفريق'); } else toast('وقفت مشاركة موقعك');
+            await teamConnect();                       // reconnect so the last-will matches the new state
+          } else { ts.viewing = !ts.viewing; saveSettings(); renderTeam(); }
+          sw.classList.toggle('on', !!ts[k]); sw.setAttribute('aria-checked', !!ts[k]);
+          return;
+        }
+        const it = e.target.closest('[data-mate]');
+        if (it) { const m = TEAM.members.get(it.dataset.mate); if (m?.la != null) { map.flyTo([m.la, m.lo], 19); closeSheet(); } }
+      });
+      $('#tLeave', body).onclick = async () => {
+        if (!confirm('تطلع من الفريق وتوقف مشاركة موقعك؟')) return;
+        if (ts.sharing) await teamStopSharing();
+        Object.assign(ts, { code: null, sharing: false }); saveSettings();
+        teamDisconnect(); TEAM.members.clear(); renderTeam(); closeSheet(); toast('طلعت من الفريق');
+      };
+    }
+    return () => { delete $('#sheet').dataset.panel; };
+  });
+}
+$('#btnTeam').onclick = openTeam;
+
+// joining from a shared link: https://…/maps/#team=CODE
+async function teamFromLink() {
+  const m = location.hash.match(/team=([A-Za-z0-9-]+)/); if (!m) return;
+  history.replaceState(null, '', location.pathname + location.search);
+  const c = normCode(m[1]); if (c.length < 8) return;
+  const code = c.slice(0, 5) + '-' + c.slice(5), ts = teamSettings();
+  if (ts.code === code) return;
+  if (!confirm(`تنضم لفريق ${code} حتى تشوفون مواقع بعض؟`)) return;
+  if (ts.sharing) await teamStopSharing();
+  Object.assign(ts, { code, sharing: false, viewing: true }); saveSettings();
+  await teamConnect(); openTeam();
+}
+
 // ---------------------------------------------------------------- analysis
 function analysisHtml() {
   const H = S.heritageGeo.features;
@@ -1522,6 +1767,7 @@ function onFix(pos) {
   if (first) { follow = true; $('#btnGps').classList.add('follow'); map.flyTo([lat, lng], Math.max(map.getZoom(), 18)); }
   else if (follow) map.panTo([lat, lng], { animate: true });
   if (track) trackFix(lat, lng, acc);
+  if (teamSettings().sharing) teamPublish();
   const w = fixWaiters; fixWaiters = []; w.forEach(fn => fn(S.me));
 }
 $('#btnGps').onclick = () => {
@@ -1831,6 +2077,9 @@ $('#btnSite').onclick = () => map.flyTo(SITE_CENTER, SITE_ZOOM);
   try { await loadStatic(); } catch (e) { console.error(e); toast('تعذّر تحميل طبقات السايت'); }
   renderHeritage(); renderStreets(); renderPlaces(); renderAxes(); renderHeritagePoints(); renderPlan(); renderSurvey();
   document.body.dataset.mode = S.settings.mode;
+  L_.team.addTo(map);
+  if (teamSettings().code) { teamConnect(); if (teamSettings().sharing) startGps(); }
+  teamFromLink();
   $$('.modes button').forEach(b => b.classList.toggle('on', b.dataset.mode === S.settings.mode));
   applyLayerVisibility();
   if (navigator.storage?.persist) navigator.storage.persist().catch(() => {});
