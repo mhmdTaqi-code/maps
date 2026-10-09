@@ -3,7 +3,7 @@
 'use strict';
 
 // ---------------------------------------------------------------- constants
-const DATA_VERSION = '25';    // bump when files in data/ change (also in sw.js)
+const DATA_VERSION = '26';    // bump when files in data/ change (also in sw.js)
 const SITE_CENTER = [33.3387, 44.3935];
 const SITE_ZOOM = 17;
 const BAGHDAD_VIEWBOX = '44.20,33.45,44.55,33.20';
@@ -415,7 +415,11 @@ function surveyLayer(f) {
       icon: L.divIcon({ className: '', html: ph ? `<div class="thumb-pin pt" data-ph="${ph}" style="border-color:${color}"></div>` : `<div class="pin" style="background:${color}"></div>`,
         iconSize: ph ? [38, 38] : [22, 22], iconAnchor: ph ? [19, 19] : [11, 11] }),
     });
-    if (ph) lyr.on('add', async () => { const el = lyr.getElement()?.querySelector('[data-ph]'); if (el) el.style.backgroundImage = `url(${await photoUrl(ph)})`; });
+    if (ph) lyr.on('add', async () => {
+      const el = lyr.getElement()?.querySelector('[data-ph]'); if (!el) return;
+      const u = await photoUrl(ph);
+      if (u) el.style.backgroundImage = `url(${u})`; else el.classList.add('waiting');      // still uploading from its phone
+    });
   } else {
     const style = kind === 'line'
       ? { pane: 'surveyPane', color, weight: p.category === 'darb' || p.category === 'deadend' ? 5 : 4, opacity: .95, dashArray: p.category === 'axis' ? '10 8' : p.category === 'deadend' ? '2 7' : null, lineCap: 'round' }
@@ -554,7 +558,8 @@ async function photoUrl(id, thumb = true) {
   const p = await DB.get('photos', id); if (!p) return '';
   let b = thumb ? (p.thumb || p.blob) : p.blob;
   // a teammate's photo that is only in the cloud: download once, then it is on this phone too
-  if (!b && p.cloud && cloudOn()) { try { b = await cloudPhotoBlob(p, thumb); } catch { return ''; } }
+  if (!b && cloudOn()) { try { b = await cloudPhotoBlob(p, thumb); } catch { b = null; } }
+  if (!b && !thumb) b = p.thumb;
   if (!b) return '';
   const u = URL.createObjectURL(b); S.urls.set(key, u); return u;
 }
@@ -571,7 +576,8 @@ async function renderPhotoGrid(el, ids, onRemove) {
   el.innerHTML = '';
   for (const id of ids) {
     const d = document.createElement('div'); d.className = 'ph';
-    d.style.backgroundImage = `url(${await photoUrl(id)})`;
+    const u = await photoUrl(id);
+    if (u) d.style.backgroundImage = `url(${u})`; else { d.classList.add('waiting'); d.textContent = '⏳'; }
     d.onclick = () => openGallery(ids, ids.indexOf(id));
     if (onRemove) {
       const b = document.createElement('button'); b.textContent = '✕'; b.title = 'إزالة الصورة';
@@ -1214,7 +1220,10 @@ async function renderHero(el, ids, ownerId) {
   if (!ids.length) return;
   el.innerHTML = `<div class="hero-strip">${ids.map((pid, i) => `<button class="hero-ph" data-i="${i}" aria-label="صورة ${i + 1}"></button>`).join('')}</div><span class="hero-count">${ids.length} صورة</span>`;
   const btns = $$('.hero-ph', el);
-  btns.forEach(async (b, i) => { b.style.backgroundImage = `url(${await photoUrl(ids[i], false)})`; });
+  btns.forEach(async (b, i) => {
+    const u = await photoUrl(ids[i], false);
+    if (u) b.style.backgroundImage = `url(${u})`; else { b.classList.add('waiting'); b.textContent = '⏳ الصورة بعدها ترتفع من تلفون صاحبها'; }
+  });
   el.onclick = e => { const b = e.target.closest('.hero-ph'); if (b) openGallery(ids, +b.dataset.i, ownerId); };
 }
 
@@ -1473,7 +1482,12 @@ const deviceId = (() => {
   } catch { return uid('D'); }
 })();
 const myColor = () => TEAM_COLORS[[...deviceId].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7) % TEAM_COLORS.length];
-const teamSettings = () => (S.settings.team ||= { code: null, sharing: false, viewing: true });
+const SITE_TEAM_CODE = 'RUSAF-AMAPS';   // the site's own team — everyone who opens the app is in it
+const teamSettings = () => {
+  const t = (S.settings.team ||= { code: null, sharing: false, viewing: true });
+  if (!t.code && !t.left) t.code = SITE_TEAM_CODE;
+  return t;
+};
 const normCode = c => (c || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 function newTeamCode() {
   const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789', r = crypto.getRandomValues(new Uint8Array(10));
@@ -1637,6 +1651,26 @@ function renderTeamList() {
       ${S.me && m.la != null ? `<span class="dist">${fmtLen(map.distance([S.me.lat, S.me.lng], [m.la, m.lo]))}</span>` : ''}</div>`).join('')
     : `<p class="muted">${TEAM.code ? 'ماكو أحد من الفريق مشارك موقعه هسه.' : ''}</p>`;
 }
+// first open: who are you, and do you want the team to see you on the map?
+function openWelcome() {
+  openSheet('أهلاً بيك 👋', `
+    <p class="muted" style="margin-top:0">التطبيق مربوط تلقائياً بفريق السايت وبـ Drive الفريق — صورك وملاحظاتك توصل للكل.</p>
+    <label class="f"><span>اسمك (يطلع على صورك وعلى موقعك بالخريطة)</span><input id="wName" value="${esc(S.settings.observer)}" placeholder="مثلاً: محمد تقي"></label>
+    ${swHtml('wShare', 'شارك موقعي ويه الفريق', 'يشوفون وين أنت ويه حركتك وأنت بالسايت — تكدر توقفه بأي وقت من زر 👥', true, 'background:#3ddc84;border-radius:50%')}
+    <button class="btn primary block" id="wGo" style="margin-top:12px">يلا نبدي</button>`, body => {
+    const sw = $('.switch', body); sw.onclick = () => sw.classList.toggle('on');
+    $('#wGo', body).onclick = async () => {
+      const n = $('#wName', body).value.trim();
+      if (!n) { toast('اكتب اسمك حتى الفريق يعرفك'); return $('#wName', body).focus(); }
+      S.settings.observer = n; S.settings.welcomed = true;
+      const ts = teamSettings(), share = sw.classList.contains('on');
+      if (share !== !!ts.sharing) { ts.sharing = share; }
+      await saveSettings(); closeSheet();
+      if (share) { startGps(); await teamConnect(); toast('موقعك صار يطلع للفريق — وتشوف مواقعهم هم'); }
+      else toast('تكدر تشغّل مشاركة الموقع بعدين من زر 👥');
+    };
+  });
+}
 function openTeam() {
   const ts = teamSettings();
   const link = ts.code ? `${location.origin}${location.pathname}#team=${normCode(ts.code)}` : '';
@@ -1691,7 +1725,7 @@ function openTeam() {
       $('#tLeave', body).onclick = async () => {
         if (!confirm('تطلع من الفريق وتوقف مشاركة موقعك؟')) return;
         if (ts.sharing) await teamStopSharing();
-        Object.assign(ts, { code: null, sharing: false }); saveSettings();
+        Object.assign(ts, { code: null, sharing: false, left: true }); saveSettings();
         teamDisconnect(); TEAM.members.clear(); renderTeam(); closeSheet(); toast('طلعت من الفريق');
       };
     }
@@ -1789,17 +1823,35 @@ async function cloudSync() {
     for (let i = 0; i < recs.length; i += 40) await cloudCall({ action: 'putRecords', records: recs.slice(i, i + 40) });
     if (recs.length) { c.lastPush = recs.reduce((a, r) => (r.updated > a ? r.updated : a), c.lastPush || ''); await saveSettings(); }
 
-    // 2) upload photos that are only on this phone (one at a time; resumes after a reload)
+    // 2a) thumbnails first — a few KB each, so teammates see every photo within seconds
     const owners = photoOwners();
-    const pending = (await DB.all('photos')).filter(p => p.blob && !p.cloud);
+    const local = (await DB.all('photos')).filter(p => p.blob && !p.remote);
+    const meta = p => ({ created: p.created, observer: p.observer || S.settings.observer, lat: p.lat, lng: p.lng, name: p.name });
+    for (const p of local.filter(p => !p.thumbSent && !p.cloud && p.thumb)) {
+      try {
+        await cloudCall({ action: 'putThumb', id: p.id, thumb: await blobToB64(p.thumb), ownerId: owners.get(p.id)?.id || '', ownerName: owners.get(p.id)?.name || '', meta: meta(p) }, 30000);
+        p.thumbSent = true; await DB.put('photos', p);
+      } catch (e) { if (!navigator.onLine) throw e; }
+    }
+    // 2b) then the full photos, one at a time; one failing photo never blocks the others
+    const pending = local.filter(p => !p.cloud && (p.cloudErrs || 0) < 5);
     CLOUD.upTotal = pending.length; CLOUD.up = 0;
+    let failed = 0;
     for (const p of pending) {
       if (!navigator.onLine) throw new Error('انقطع النت');
-      const j = await cloudCall({ action: 'putPhoto', id: p.id, mime: p.blob.type || 'image/jpeg', data: await blobToB64(p.blob), ownerId: owners.get(p.id)?.id || '', ownerName: owners.get(p.id)?.name || '',
-        meta: { created: p.created, observer: p.observer, lat: p.lat, lng: p.lng, name: p.name } }, 60000 + p.blob.size / 25);   // ≈ 25 KB/s worst case
-      p.cloud = j.fileId;
-      // the original is safe in Drive now: keep a light 1600 px copy on the phone so storage doesn't fill up
-      if (p.blob.size > 1.5e6) { try { p.blob = await compressImage(p.blob, 1600, .82); p.slim = true; } catch {} }
+      try {
+        const big = p.blob.size > 1.5e6;
+        const preview = big ? await compressImage(p.blob, 1600, .82).catch(() => null) : null;
+        const j = await cloudCall({ action: 'putPhoto', id: p.id, mime: p.blob.type || 'image/jpeg', data: await blobToB64(p.blob),
+          preview: preview ? await blobToB64(preview) : undefined, thumb: p.thumb ? await blobToB64(p.thumb) : undefined,
+          ownerId: owners.get(p.id)?.id || '', ownerName: owners.get(p.id)?.name || '', meta: meta(p) }, 60000 + p.blob.size / 25);   // ≈ 25 KB/s worst case
+        p.cloud = j.fileId;
+        // the original is safe in Drive now: keep the light 1600 px copy on the phone so storage doesn't fill up
+        if (preview) { p.blob = preview; p.slim = true; }
+      } catch (e) {
+        if (!navigator.onLine) throw e;
+        p.cloudErrs = (p.cloudErrs || 0) + 1; failed++;
+      }
       await DB.put('photos', p);
       CLOUD.up++; setCloudState('sync');
     }
@@ -1814,14 +1866,21 @@ async function cloudSync() {
     for (const r of j.records.filter(r => r.store === 'deleted')) {
       if (S.features.has(r.id)) { S.features.delete(r.id); await DB.del('features', r.id); changed++; }
     }
+    let newPhotos = 0;
     for (const ph of j.photos) {
       const cur = await DB.get('photos', ph.id);
-      if (!cur) await DB.put('photos', { id: ph.id, cloud: ph.fileId, remote: true, created: ph.created, observer: ph.observer, owner: ph.owner });
-      else if (!cur.cloud) { cur.cloud = ph.fileId; await DB.put('photos', cur); }
+      const thumb = ph.thumb ? b64ToBlob(ph.thumb, 'image/webp') : null;
+      if (!cur) { await DB.put('photos', { id: ph.id, cloud: ph.fileId || '', remote: true, created: ph.created, observer: ph.observer, owner: ph.owner, thumb }); newPhotos++; }
+      else if (cur.remote && ((ph.fileId && !cur.cloud) || (thumb && !cur.thumb))) {
+        if (ph.fileId) cur.cloud = ph.fileId;
+        if (thumb && !cur.thumb) cur.thumb = thumb;
+        await DB.put('photos', cur); newPhotos++;
+      }
     }
     c.lastPull = j.now; await saveSettings();
-    if (changed) { renderSurvey(); renderHeritage(); renderHeritagePoints(); }
-    CLOUD.lastOk = Date.now(); setCloudState('idle');
+    if (changed || newPhotos) { for (const k of [...S.urls.keys()]) if (!S.urls.get(k)) S.urls.delete(k); renderSurvey(); renderHeritage(); renderHeritagePoints(); }
+    CLOUD.lastOk = Date.now();
+    setCloudState(failed ? 'error' : 'idle', failed ? `${failed} صورة ما انرفعت — راح يعيد المحاولة` : '');
   } catch (e) {
     setCloudState(navigator.onLine ? 'error' : 'offline', e.name === 'AbortError' ? 'الخادم بطيء' : e.message);
   } finally { CLOUD.busy = false; }
@@ -1838,7 +1897,8 @@ addEventListener('online', () => cloudKick(1000));
 
 // a photo that lives only in the cloud (taken by a teammate): fetch through the script and keep it
 async function cloudPhotoBlob(p, thumb) {
-  const j = await cloudCall({ action: 'getPhoto', fileId: p.cloud, thumb }, 90000);
+  if (!p.cloud) return thumb ? null : p.thumb || null;           // original still uploading from its phone
+  const j = await cloudCall({ action: 'getPhoto', fileId: p.cloud, size: thumb ? 'thumb' : 'preview' }, 90000);
   const blob = b64ToBlob(j.data, j.mime);
   if (thumb) p.thumb = blob; else { p.blob = blob; if (!p.thumb) p.thumb = blob; }
   await DB.put('photos', p);
@@ -2341,6 +2401,7 @@ $('#btnSite').onclick = () => map.flyTo(SITE_CENTER, SITE_ZOOM);
   document.body.dataset.mode = S.settings.mode;
   L_.team.addTo(map);
   if (teamSettings().code) { teamConnect(); if (teamSettings().sharing) startGps(); }
+  if (!S.settings.welcomed) setTimeout(openWelcome, 900);
   teamFromLink();
   await cloudFromLink();
   cloudStart();

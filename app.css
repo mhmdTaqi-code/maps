@@ -327,3 +327,8 @@ details.howto code { background: var(--panel); padding: 0 4px; border-radius: 4p
 .gal-strip { display: flex; gap: 6px; overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 4px; }
 .gal-ph { flex: 0 0 96px; height: 96px; border: 0; border-radius: 10px; background: var(--panel-2) center/cover; cursor: zoom-in; }
 .gal-ph.missing { background: repeating-linear-gradient(45deg, var(--panel-2) 0 8px, var(--line) 8px 16px); }
+
+/* photo still uploading from a teammate's phone */
+.thumb-pin.waiting { background: #3b3127 !important; display: grid; place-items: center; }
+.thumb-pin.waiting::before { content: "📷"; font-size: 15px; }
+.ph.waiting, .hero-ph.waiting { display: grid; place-items: center; color: var(--ink-2); font-size: 13px; text-align: center; padding: 8px; background: var(--panel-2); }
