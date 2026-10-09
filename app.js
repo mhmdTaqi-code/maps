@@ -3,7 +3,7 @@
 'use strict';
 
 // ---------------------------------------------------------------- constants
-const DATA_VERSION = '23';    // bump when files in data/ change (also in sw.js)
+const DATA_VERSION = '24';    // bump when files in data/ change (also in sw.js)
 const SITE_CENTER = [33.3387, 44.3935];
 const SITE_ZOOM = 17;
 const BAGHDAD_VIEWBOX = '44.20,33.45,44.55,33.20';
@@ -89,11 +89,18 @@ const DB = {
         const d = r.result;
         for (const s of ['features', 'photos', 'heritage', 'meta']) if (!d.objectStoreNames.contains(s)) d.createObjectStore(s, { keyPath: 'id' });
       };
-      r.onsuccess = () => { this.db = r.result; res(); };
-      r.onerror = () => rej(r.error);
+      // never let a stuck database freeze the whole app: give up after 5 s and run without local storage
+      const to = setTimeout(() => rej(new Error('db timeout')), 5000);
+      r.onsuccess = () => {
+        clearTimeout(to); this.db = r.result;
+        this.db.onversionchange = () => { this.db.close(); this.db = null; };   // don't block other tabs
+        res();
+      };
+      r.onerror = () => { clearTimeout(to); rej(r.error); };
     });
   },
   _tx(store, mode, fn) {
+    if (!this.db) return Promise.reject(new Error('التخزين المحلي غير متاح'));
     return new Promise((res, rej) => {
       const t = this.db.transaction(store, mode);
       const req = fn(t.objectStore(store));
@@ -831,7 +838,7 @@ const PANELS = {
       $('#offline', body).onclick = e => downloadOffline(e.target);
       $('#calib', body).onclick = () => { closeSheet(); openCalibration(); };
       $('#wipe', body).onclick = wipeAll;
-      storageInfo($('#storageInfo', body));
+      storageInfo($('#storageInfo', body)).catch(() => { $('#storageInfo', body).textContent = 'التخزين المحلي مقفول — سدّ كل تبويبات الموقع وافتحه من جديد.'; });
       $('#cTest', body).onclick = async e => {
         const c = cloudCfg(); c.url = $('#cUrl', body).value.trim() || TEAM_CLOUD_URL; c.key = $('#cKey', body).value.trim() || 'open';
         if (!/^https:\/\//.test(c.url)) return toast('الرابط غير صالح');
@@ -874,7 +881,17 @@ function galleryGroups() {
   return out.sort((a, b) => b.updated.localeCompare(a.updated));
 }
 async function drawGallery(el, q) {
-  GALLERY_GROUPS = galleryGroups().filter(g => !q || (g.title + ' ' + g.sub).includes(q));
+  GALLERY_GROUPS = galleryGroups();
+  // photos in the team Drive that no record points at (yet) — grouped by their Drive folder name
+  const used = new Set(GALLERY_GROUPS.flatMap(g => g.ids)), loose = new Map();
+  for (const ph of await DB.all('photos').catch(() => [])) {
+    if (used.has(ph.id) || !(ph.cloud || ph.blob)) continue;
+    const k = ph.owner || 'صور بدون مبنى';
+    if (!loose.has(k)) loose.set(k, { title: k, sub: 'من Drive الفريق', ids: [], updated: ph.created || '', go: () => toast('هاي الصور مو مربوطة بمبنى بالخريطة') });
+    loose.get(k).ids.push(ph.id);
+  }
+  GALLERY_GROUPS.push(...loose.values());
+  GALLERY_GROUPS = GALLERY_GROUPS.filter(g => !q || (g.title + ' ' + g.sub).includes(q));
   const total = GALLERY_GROUPS.reduce((a, g) => a + g.ids.length, 0);
   if (!total) { el.innerHTML = '<p class="muted">ماكو صور بعد. صوّروا المباني من بطاقاتها — وتطلع هنا صور كل الفريق.</p>'; return; }
   el.innerHTML = `<p class="muted" style="margin:4px 0 10px">${total} صورة بـ ${GALLERY_GROUPS.length} مكان — من كل الفريق</p>` + GALLERY_GROUPS.map((g, gi) => `
@@ -1787,7 +1804,7 @@ async function cloudSync() {
     }
     for (const ph of j.photos) {
       const cur = await DB.get('photos', ph.id);
-      if (!cur) await DB.put('photos', { id: ph.id, cloud: ph.fileId, remote: true, created: ph.created, observer: ph.observer });
+      if (!cur) await DB.put('photos', { id: ph.id, cloud: ph.fileId, remote: true, created: ph.created, observer: ph.observer, owner: ph.owner });
       else if (!cur.cloud) { cur.cloud = ph.fileId; await DB.put('photos', cur); }
     }
     c.lastPull = j.now; await saveSettings();
@@ -2304,7 +2321,7 @@ $('#btnSite').onclick = () => map.flyTo(SITE_CENTER, SITE_ZOOM);
 
 // ---------------------------------------------------------------- boot
 (async () => {
-  try { await DB.open(); await loadUserData(); } catch (e) { console.error(e); toast('التخزين المحلي غير متاح — البيانات ما راح تنحفظ'); }
+  try { await DB.open(); await loadUserData(); } catch (e) { console.error(e); toast('التخزين المحلي مقفول — سدّ كل تبويبات الموقع وافتحه من جديد', 6000); }
   applyTheme();
   setBasemap(S.settings.basemap in BASEMAPS ? S.settings.basemap : 'sat');
   try { await loadStatic(); } catch (e) { console.error(e); toast('تعذّر تحميل طبقات السايت'); }
