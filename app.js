@@ -3,7 +3,7 @@
 'use strict';
 
 // ---------------------------------------------------------------- constants
-const DATA_VERSION = '24';    // bump when files in data/ change (also in sw.js)
+const DATA_VERSION = '25';    // bump when files in data/ change (also in sw.js)
 const SITE_CENTER = [33.3387, 44.3935];
 const SITE_ZOOM = 17;
 const BAGHDAD_VIEWBOX = '44.20,33.45,44.55,33.20';
@@ -527,14 +527,19 @@ async function compressImage(file, max, q) {
 }
 // WebP is ~30% smaller than JPEG at the same quality; Safari versions without WebP encoding fall back to JPEG
 const PHOTO_TYPE = (() => { try { const c = document.createElement('canvas'); c.width = c.height = 1; return c.toDataURL('image/webp').startsWith('data:image/webp') ? 'image/webp' : 'image/jpeg'; } catch { return 'image/jpeg'; } })();
-const photoExt = t => (t === 'image/webp' ? 'webp' : 'jpg');
+const photoExt = t => ({ 'image/webp': 'webp', 'image/png': 'png', 'image/heic': 'heic', 'image/heif': 'heif' }[t] || 'jpg');
+// «أصلية» keeps the camera file untouched (up to the cloud's ≈ 35 MB per photo); «مضغوطة» = 1600 px WebP
+const MAX_ORIGINAL = 34 * 1024 * 1024;
+const keepOriginal = () => S.settings.photoQuality !== 'compressed';
 async function addPhotos(files) {
   const ids = [], imgs = [...files].filter(f => f.type.startsWith('image/') || /\.(jpe?g|png|webp|heic)$/i.test(f.name));
   // one at a time: phones run out of memory decoding many full-size camera photos in parallel
   for (const [i, file] of imgs.entries()) {
     if (imgs.length > 1) toast(`جاري حفظ الصور ${i + 1} / ${imgs.length}…`, 60000);
     try {
-      const blob = await compressImage(file, 1600, .78), thumb = await compressImage(file, 320, .62);
+      const orig = keepOriginal() && /^image\/(jpeg|png|webp|heic|heif)$/.test(file.type);
+      const blob = orig && file.size <= MAX_ORIGINAL ? file : await compressImage(file, orig ? 4096 : 1600, orig ? .92 : .78);
+      const thumb = await compressImage(file, 320, .62);
       const id = uid('P');
       await DB.put('photos', { id, blob, thumb, created: nowIso(), lat: S.me?.lat ?? null, lng: S.me?.lng ?? null, observer: S.settings.observer, name: file.name });
       ids.push(id);
@@ -816,6 +821,9 @@ const PANELS = {
       </details>
       <h3>التخزين على هذا الجهاز</h3>
       <p class="muted" id="storageInfo">جاري الحساب…</p>
+      <label class="f"><span>جودة الصور المرفوعة للـ Drive</span></label>
+      ${chipsHtml('pq', [['original', 'أصلية — بدون ضغط (حد ≈ 35 MB للصورة)'], ['compressed', 'مضغوطة — أسرع على النت الضعيف']], S.settings.photoQuality || 'original')}
+      <p class="muted" style="margin-top:6px">بالأصلية: الصورة تنرفع كما هي، وبعد ما توصل الـ Drive يحتفظ التلفون بنسخة أخف حتى ما تتعبّى ذاكرته.</p>
       <h3>العمل بدون انترنت</h3>
       <p class="muted">نزّل صور القمر الصناعي للسايت قبل لا تطلعون، حتى الخريطة تشتغل حتى لو النت ضعيف.</p>
       <button class="btn block" id="offline">تنزيل خريطة السايت للاستخدام بدون نت</button>
@@ -838,6 +846,7 @@ const PANELS = {
       $('#offline', body).onclick = e => downloadOffline(e.target);
       $('#calib', body).onclick = () => { closeSheet(); openCalibration(); };
       $('#wipe', body).onclick = wipeAll;
+      $('.chips[data-name="pq"]', body).addEventListener('change', () => { S.settings.photoQuality = chipVal(body, 'pq') || 'original'; saveSettings(); toast(S.settings.photoQuality === 'original' ? 'الصور الجديدة تنرفع بجودتها الأصلية' : 'الصور الجديدة تنضغط قبل الرفع'); });
       storageInfo($('#storageInfo', body)).catch(() => { $('#storageInfo', body).textContent = 'التخزين المحلي مقفول — سدّ كل تبويبات الموقع وافتحه من جديد.'; });
       $('#cTest', body).onclick = async e => {
         const c = cloudCfg(); c.url = $('#cUrl', body).value.trim() || TEAM_CLOUD_URL; c.key = $('#cKey', body).value.trim() || 'open';
@@ -1787,8 +1796,11 @@ async function cloudSync() {
     for (const p of pending) {
       if (!navigator.onLine) throw new Error('انقطع النت');
       const j = await cloudCall({ action: 'putPhoto', id: p.id, mime: p.blob.type || 'image/jpeg', data: await blobToB64(p.blob), ownerId: owners.get(p.id)?.id || '', ownerName: owners.get(p.id)?.name || '',
-        meta: { created: p.created, observer: p.observer, lat: p.lat, lng: p.lng, name: p.name } }, 120000);
-      p.cloud = j.fileId; await DB.put('photos', p);
+        meta: { created: p.created, observer: p.observer, lat: p.lat, lng: p.lng, name: p.name } }, 60000 + p.blob.size / 25);   // ≈ 25 KB/s worst case
+      p.cloud = j.fileId;
+      // the original is safe in Drive now: keep a light 1600 px copy on the phone so storage doesn't fill up
+      if (p.blob.size > 1.5e6) { try { p.blob = await compressImage(p.blob, 1600, .82); p.slim = true; } catch {} }
+      await DB.put('photos', p);
       CLOUD.up++; setCloudState('sync');
     }
     CLOUD.upTotal = 0;

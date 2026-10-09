@@ -13,7 +13,7 @@
  * Updating this code later: Deploy → Manage deployments → ✏️ → Version: New version → Deploy (URL stays the same).
  *
  * Access: OPEN_ACCESS = true means anyone who has the site can upload — the site is the team's.
- * Protections either way: only images, max size per photo, a daily cap per device, and reads are limited
+ * Protections either way: only images, max ≈ 35 MB per photo (Apps Script's request limit), a daily cap per device, and reads are limited
  * to the survey photos this script stored (nothing else in your Drive can be fetched).
  * For a password instead, set OPEN_ACCESS = false and run `setup` (creates a key + join link).
  */
@@ -22,8 +22,8 @@ const APP_URL = 'https://mhmdtaqi.me/maps/';
 const WEBAPP_URL = '';                                // only needed for the join link when OPEN_ACCESS = false
 const ROOT_NAME = 'مسح السايت — الرصافة القديمة';
 const MAX_CELL = 45000;                             // Sheets cell limit is 50,000 characters
-const MAX_PHOTO_B64 = 6 * 1024 * 1024;               // ≈ 4.5 MB per photo (the app sends ≈ 0.3 MB)
-const DAILY_PHOTOS_PER_DEVICE = 1500;
+const MAX_PHOTO_B64 = 48 * 1024 * 1024;              // ≈ 35 MB per photo — Apps Script accepts ≈ 50 MB per request
+const DAILY_PHOTOS_PER_DEVICE = 5000;
 const PHOTO_COLS = ['photoId', 'fileId', 'owner', 'created', 'device', 'synced', 'bytes', 'observer', 'lat', 'lng', 'link', 'name'];
 
 function doGet() { return out({ ok: true, service: 'site-survey-cloud', version: 2, open: OPEN_ACCESS }); }
@@ -116,7 +116,7 @@ function ping() {
 // ---- photos: idempotent upload (same photoId twice = same file)
 function putPhoto(req) {
   if (!req.id || !req.data) return { ok: false, error: 'missing photo' };
-  if (String(req.data).length > MAX_PHOTO_B64) return { ok: false, error: 'photo too large' };
+  if (String(req.data).length > MAX_PHOTO_B64) return { ok: false, error: 'photo too large (max ≈ 35 MB)' };
   const sh = book().getSheetByName('photos');
   const found = sh.getRange('A:A').createTextFinder(String(req.id)).matchEntireCell(true).findNext();
   if (found) return { ok: true, fileId: sh.getRange(found.getRow(), 2).getValue(), existed: true };
@@ -124,10 +124,11 @@ function putPhoto(req) {
   const day = now().slice(0, 10), cache = CacheService.getScriptCache(), qk = 'q:' + clean(req.device).slice(0, 40) + ':' + day;
   const used = Number(cache.get(qk) || 0);
   if (used >= DAILY_PHOTOS_PER_DEVICE) return { ok: false, error: 'daily limit reached' };
-  const mime = req.mime === 'image/webp' ? 'image/webp' : 'image/jpeg';
+  const EXT = { 'image/webp': 'webp', 'image/jpeg': 'jpg', 'image/png': 'png', 'image/heic': 'heic', 'image/heif': 'heif', 'image/gif': 'gif', 'image/tiff': 'tif', 'image/avif': 'avif' };
+  const mime = EXT[req.mime] ? req.mime : (/^image\//.test(String(req.mime)) ? req.mime : 'image/jpeg');
   const bytes = Utilities.base64Decode(req.data);
   const m = req.meta || {}, when = String(m.created || now()).slice(0, 16).replace('T', '_').replace(':', '');
-  const fname = clean(`${when}_${m.observer || 'مجهول'}_${req.id}`) + (mime === 'image/webp' ? '.webp' : '.jpg');
+  const fname = clean(`${when}_${m.observer || 'مجهول'}_${req.id}`) + '.' + (EXT[mime] || 'img');
   const file = folderFor(req.ownerId || req.owner, req.ownerName).createFile(Utilities.newBlob(bytes, mime, fname));
   file.setDescription(JSON.stringify(m));
   withLock(() => sh.appendRow([req.id, file.getId(), clean(req.ownerName || req.owner), m.created || '', req.device || '', now(), bytes.length,
