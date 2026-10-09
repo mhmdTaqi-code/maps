@@ -792,7 +792,7 @@ const PANELS = {
           <li>افتح <a href="https://script.google.com/home/projects/create" target="_blank" rel="noopener">script.google.com</a> بحساب Google (حساب الجامعة إذا مساحته أكبر).</li>
           <li>امسح الموجود والصق كود <a href="https://github.com/mhmdTaqi-code/maps/blob/main/cloud/Code.gs" target="_blank" rel="noopener">Code.gs</a>.</li>
           <li>Deploy ← New deployment ← Web app ← Execute as: <b>Me</b> ← Who has access: <b>Anyone</b> ← Deploy، ووافق على الصلاحيات.</li>
-          <li>اختار الدالة <code>setup</code> ودوس Run. تطلع كلمة سر عشوائية و<b>رابط انضمام</b> بتبويب «الإعداد» بجدول السجل بالـ Drive.</li>
+          <li>الصق رابط الـ Web app (ينتهي بـ /exec) بـ <code>WEBAPP_URL</code> بالكود، احفظ، واختار الدالة <code>setup</code> ودوس Run. تطلع كلمة سر عشوائية و<b>رابط انضمام</b> بتبويب «الإعداد» بجدول السجل بالـ Drive.</li>
           <li>افتح رابط الانضمام بالتلفون — التطبيق يتفعّل وحده — ودزّه للفريق.</li>
         </ol>
         <p>الصور تنحفظ بمجلد «مسح السايت» بـ Drive مالتك، كل مبنى بمجلد، والسجل بجدول Google Sheets بنفس المجلد. محد يكدر يوصلها بدون كلمة السر.</p>

@@ -6,13 +6,14 @@
  *   1. https://script.google.com → New project → paste this whole file.
  *   2. Deploy → New deployment → type "Web app" → Execute as: Me → Who has access: Anyone → Deploy
  *      → authorise with your Google account.
- *   3. Select the function `setup` → Run. It creates the Drive folder + sheet and a random secret key,
+ *   3. Paste the Web app URL (…/exec) into WEBAPP_URL below, save, select the function `setup` → Run. It creates the Drive folder + sheet and a random secret key,
  *      and writes the team JOIN LINK into the sheet's «الإعداد» tab (and the execution log).
  *   4. Open the join link on your phone and send it to the team — the app configures itself.
  * Nothing is public: requests without the key are refused, and the photos stay private in your Drive
  * (the app fetches them through this script). Run `rotateKey` to revoke access and get a new link.
  */
 const APP_URL = 'https://mhmdtaqi.me/maps/';
+const WEBAPP_URL = '';   // ← after deploying, paste the Web app URL here (…/exec), then run setup
 const ROOT_NAME = 'مسح السايت — الرصافة القديمة';
 const MAX_CELL = 45000;                             // Sheets cell limit is 50,000 characters
 
@@ -153,8 +154,10 @@ function setup() {
   const p = props();
   if (!p.getProperty('SYNC_KEY')) p.setProperty('SYNC_KEY', Utilities.getUuid().replace(/-/g, '') + Utilities.getUuid().replace(/-/g, '').slice(0, 12));
   const ss = book(); root();
-  const url = ScriptApp.getService().getUrl();
-  if (!url) throw new Error('انشر السكربت أول: Deploy → New deployment → Web app');
+  // ScriptApp.getService().getUrl() can return the editor's test deployment, which teammates cannot use,
+  // so the published …/exec address is pasted into WEBAPP_URL above
+  const url = WEBAPP_URL;
+  if (!/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec$/.test(url)) throw new Error('الصق رابط الـ Web app (ينتهي بـ /exec) بـ WEBAPP_URL فوق');
   const link = APP_URL + '#cloud=' + encodeURIComponent(url) + '~' + p.getProperty('SYNC_KEY');
   let sh = ss.getSheetByName('الإعداد'); if (!sh) sh = ss.insertSheet('الإعداد');
   sh.clear();
