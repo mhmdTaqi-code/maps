@@ -4,8 +4,8 @@
 //  - versioned app files, data and pinned CDN libraries: precached, cache first (URLs change per version)
 //  - map tiles: cache-first, capped so the phone's storage doesn't fill up
 // Bump VERSION whenever app.js / app.css / index.html / data/* change (keep DATA_VERSION in app.js in sync).
-const VERSION = '29';
-const SHELL = `shell-v${VERSION}`, TILES = 'tiles-v1', TILE_LIMIT = 4000;
+const VERSION = '30';
+const SHELL = `shell-v${VERSION}`, TILES = 'tiles-v2', TILE_LIMIT = 4000;
 const TILE_HOSTS = ['server.arcgisonline.com', 'tile.openstreetmap.org', 'basemaps.cartocdn.com'];
 const DATA = ['heritage', 'buildings', 'streets', 'site', 'landmarks', 'context_buildings', 'cad_contours', 'places', 'heritage_points'].map(n => `data/${n}.json?v=${VERSION}`);
 const PRECACHE = [
@@ -21,7 +21,7 @@ self.addEventListener('install', e => {
   e.waitUntil(caches.open(SHELL).then(c => Promise.all(PRECACHE.map(u => c.add(u).catch(() => {})))).then(() => self.skipWaiting()));
 });
 self.addEventListener('activate', e => {
-  e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k.startsWith('shell-') && k !== SHELL).map(k => caches.delete(k))))
+  e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => (k.startsWith('shell-') && k !== SHELL) || (k.startsWith('tiles-') && k !== TILES)).map(k => caches.delete(k))))
     .then(() => self.clients.claim()));
 });
 
@@ -42,7 +42,7 @@ self.addEventListener('fetch', e => {
       if (hit) return hit;
       try {
         const r = await fetch(req);
-        if (r.ok || r.type === 'opaque') { c.put(req.url, r.clone()); clearTimeout(trimTimer); trimTimer = setTimeout(trimTiles, 5000); }
+        if (r.ok) { c.put(req.url, r.clone()); clearTimeout(trimTimer); trimTimer = setTimeout(trimTiles, 5000); }
         return r;
       } catch { return Response.error(); }
     }));

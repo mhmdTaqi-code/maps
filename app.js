@@ -3,7 +3,7 @@
 'use strict';
 
 // ---------------------------------------------------------------- constants
-const DATA_VERSION = '29';    // bump when files in data/ change (also in sw.js)
+const DATA_VERSION = '30';    // bump when files in data/ change (also in sw.js)
 const SITE_CENTER = [33.3387, 44.3935];
 const SITE_ZOOM = 17;
 const BAGHDAD_VIEWBOX = '44.20,33.45,44.55,33.20';
@@ -160,18 +160,18 @@ map.createPane('surveyPane').style.zIndex = 430;
 const esriAttr = 'Imagery © Esri, Maxar, Earthstar Geographics';
 const BASEMAPS = {
   sat: { name: 'قمر صناعي', layers: () => [
-    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxNativeZoom: 19, maxZoom: 22, attribution: esriAttr }),
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { crossOrigin: true, maxNativeZoom: 19, maxZoom: 22, attribution: esriAttr }),
   ] },
   hybrid: { name: 'هجين', layers: () => [
-    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxNativeZoom: 19, maxZoom: 22, attribution: esriAttr }),
-    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', { maxNativeZoom: 19, maxZoom: 22 }),
-    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}', { maxNativeZoom: 19, maxZoom: 22, opacity: .7 }),
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { crossOrigin: true, maxNativeZoom: 19, maxZoom: 22, attribution: esriAttr }),
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', { crossOrigin: true, maxNativeZoom: 19, maxZoom: 22 }),
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}', { crossOrigin: true, maxNativeZoom: 19, maxZoom: 22, opacity: .7 }),
   ] },
   osm: { name: 'شوارع', layers: () => [
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxNativeZoom: 19, maxZoom: 22, attribution: '© OpenStreetMap' }),
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { crossOrigin: true, maxNativeZoom: 19, maxZoom: 22, attribution: '© OpenStreetMap' }),
   ] },
   light: { name: 'فاتح', layers: () => [
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { maxNativeZoom: 20, maxZoom: 22, attribution: '© OpenStreetMap © CARTO' }),
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { crossOrigin: true, maxNativeZoom: 20, maxZoom: 22, attribution: '© OpenStreetMap © CARTO' }),
   ] },
 };
 let baseGroup = L.layerGroup().addTo(map);
@@ -1646,7 +1646,7 @@ const initials = n => (n || '؟').trim().split(/\s+/).map(w => w[0]).slice(0, 2)
 const mateLayers = new Map();   // member id -> { mk, circle, key }
 function glide(mk, to, ms = 1200) {
   const from = mk.getLatLng(), t0 = performance.now();
-  if (from.distanceTo(to) > 300 || document.hidden) return mk.setLatLng(to);   // big jumps: no animation
+  if (from.distanceTo(to) > 300 || document.hidden || !map.getBounds().pad(.2).contains(to)) return mk.setLatLng(to);   // big jumps / off-screen: no animation
   cancelAnimationFrame(mk._glide);
   const stepFn = now => {
     const k = Math.min(1, (now - t0) / ms), e = k * (2 - k);
@@ -1662,7 +1662,7 @@ function renderTeam() {
   if (ts.viewing) for (const [id, m] of TEAM.members) {
     if (m.la == null) continue;
     const age = (Date.now() - m.t) / 1000, stale = m.off || age > 120;
-    const key = `${m.c}|${stale}|${m.h}|${m.n}`;
+    const key = `${m.c}|${stale}|${m.h != null}|${m.n}`;
     let L0 = mateLayers.get(id);
     const icon = () => L.divIcon({ className: '', html: `<div class="mate${stale ? ' stale' : ''}" style="--c:${m.c}">${m.h != null && !stale ? `<i class="mate-hd" style="transform:rotate(${m.h}deg)"></i>` : ''}<span>${esc(initials(m.n))}</span></div>`, iconSize: [30, 30], iconAnchor: [15, 15] });
     if (!L0) {
@@ -1672,9 +1672,11 @@ function renderTeam() {
       L0 = { mk, circle: null, key }; mateLayers.set(id, L0); L_.team.addLayer(mk);
     } else {
       if (L0.key !== key) { L0.mk.setIcon(icon()); L0.key = key; }
-      glide(L0.mk, [m.la, m.lo]);
+      else if (m.h != null && !stale) { const hd = L0.mk.getElement()?.querySelector('.mate-hd'); if (hd) hd.style.transform = `rotate(${m.h}deg)`; }
+      const ll = L0.mk.getLatLng(); if (ll.lat !== m.la || ll.lng !== m.lo) glide(L0.mk, [m.la, m.lo]);
     }
-    L0.mk.setTooltipContent(`${esc(m.n)} · ${m.off ? 'انقطع ' + agoTxt(m.t) : agoTxt(m.t)}`);
+    const tt = `${esc(m.n)} · ${m.off ? 'انقطع ' + agoTxt(m.t) : agoTxt(m.t)}`;
+    if (L0.tt !== tt) { L0.mk.setTooltipContent(tt); L0.tt = tt; }
     const showC = !stale && m.a && m.a < 80;
     if (showC && !L0.circle) { L0.circle = L.circle([m.la, m.lo], { radius: m.a, color: m.c, weight: 1, fillColor: m.c, fillOpacity: .08, interactive: false, pane: 'teamPane' }); L_.team.addLayer(L0.circle); }
     else if (!showC && L0.circle) { L_.team.removeLayer(L0.circle); L0.circle = null; }
@@ -1844,13 +1846,17 @@ async function cloudCall(body, timeoutMs = 60000) {
   const ctl = new AbortController(), to = setTimeout(() => ctl.abort(), timeoutMs);
   try {
     // text/plain keeps it a "simple" request (no CORS preflight) — Apps Script answers through a redirect
-    const r = await fetch(c.url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ ...body, key: c.key, device: deviceId }), signal: ctl.signal, redirect: 'follow' });
+    // a big photo's base64 goes straight into the request body instead of through JSON.stringify (saves two copies)
+    const { data, ...rest } = body;
+    const head = JSON.stringify({ ...rest, key: c.key, device: deviceId });
+    const payload = typeof data === 'string' ? new Blob([head.slice(0, -1), ',"data":"', data, '"}']) : head;
+    const r = await fetch(c.url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: payload, signal: ctl.signal, redirect: 'follow' });
     const j = await r.json();
     if (!j.ok) throw new Error(j.error || 'cloud error');
     return j;
   } finally { clearTimeout(to); }
 }
-const blobToB64 = blob => new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(',')[1]); fr.onerror = rej; fr.readAsDataURL(blob); });
+const blobToB64 = blob => new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => { const r = fr.result; res(r.slice(r.indexOf(',') + 1)); }; fr.onerror = rej; fr.readAsDataURL(blob); });
 const b64ToBlob = (b, mime) => new Blob([Uint8Array.from(atob(b), c => c.charCodeAt(0))], { type: mime });
 function setCloudState(state, err = '') { CLOUD.state = state; CLOUD.err = err; const el = $('#cloudStatus'); if (el) el.innerHTML = cloudStatusHtml(); updateCloudBadge(); }
 function cloudStatusHtml() {
@@ -1941,7 +1947,8 @@ async function cloudSync() {
       }
     }
     c.lastPull = j.now; await saveSettings();
-    if (changed || newPhotos) { for (const k of [...S.urls.keys()]) if (!S.urls.get(k)) S.urls.delete(k); renderSurvey(); renderHeritage(); renderHeritagePoints(); }
+    if (changed || newPhotos) { for (const k of [...S.urls.keys()]) if (!S.urls.get(k)) S.urls.delete(k); renderSurvey(); renderHeritagePoints(); }
+    if (changed) renderHeritage();
     CLOUD.lastOk = Date.now();
     setCloudState(failed ? 'error' : 'idle', failed ? `${failed} صورة ما انرفعت — راح يعيد المحاولة` : '');
   } catch (e) {
@@ -2191,7 +2198,7 @@ function placeMe(lat, lng, acc, t) {
   } else { meMarker.setLatLng([lat, lng]); accCircle.setLatLng([lat, lng]).setRadius(acc); }
   updateHeading(); gpsChip();
   if (first) { follow = true; $('#btnGps').classList.add('follow'); map.flyTo([lat, lng], Math.max(map.getZoom(), 18)); }
-  else if (follow) map.panTo([lat, lng], { animate: true });
+  else if (follow) keepInView(lat, lng);
   if (track) trackFix(lat, lng, acc);
   if (teamSettings().sharing) teamPublish();
   const w = fixWaiters; fixWaiters = []; w.forEach(fn => fn(S.me));
@@ -2231,13 +2238,23 @@ $('#gpsChip').onclick = () => openSheet('دقة الموقع', `
     if (S.me) map.flyTo([S.me.lat, S.me.lng], Math.max(map.getZoom(), 18)); else toast('ننتظر GPS دقيق…');
   };
 }
-map.on('dragstart', () => { if (follow) { follow = false; $('#btnGps').classList.remove('follow'); } });
+const stopFollow = () => { if (follow) { follow = false; $('#btnGps').classList.remove('follow'); } };
+map.on('dragstart', stopFollow);
+map.getContainer().addEventListener('pointerdown', e => { if (!e.target.closest('.leaflet-control')) stopFollow(); }, { passive: true });
+map.getContainer().addEventListener('wheel', stopFollow, { passive: true });
+function keepInView(lat, lng) {
+  const pt = map.latLngToContainerPoint([lat, lng]), sz = map.getSize();
+  if (pt.x < sz.x * .25 || pt.x > sz.x * .75 || pt.y < sz.y * .25 || pt.y > sz.y * .7) map.panTo([lat, lng], { animate: true, duration: .4 });
+}
 
 function startCompass() {
+  let queued = false;
   const handler = e => {
-    let h = e.webkitCompassHeading ?? (e.absolute && e.alpha != null ? 360 - e.alpha : null);
-    if (h == null) return;
-    if (S.me) { S.me.heading = h; updateHeading(); }
+    const h = e.webkitCompassHeading ?? (e.absolute && e.alpha != null ? 360 - e.alpha : null);
+    if (h == null || !S.me || document.hidden) return;
+    if (S.me.heading != null && Math.abs(((h - S.me.heading + 540) % 360) - 180) < 4) return;
+    S.me.heading = h;
+    if (!queued) { queued = true; requestAnimationFrame(() => { queued = false; updateHeading(); }); }
   };
   if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
     DeviceOrientationEvent.requestPermission().then(r => r === 'granted' && addEventListener('deviceorientation', handler)).catch(() => {});
