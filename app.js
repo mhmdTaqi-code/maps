@@ -3,7 +3,7 @@
 'use strict';
 
 // ---------------------------------------------------------------- constants
-const DATA_VERSION = '34';    // bump when files in data/ change (also in sw.js)
+const DATA_VERSION = '35';    // bump when files in data/ change (also in sw.js)
 const SITE_CENTER = [33.3387, 44.3935];
 const SITE_ZOOM = 17;
 const BAGHDAD_VIEWBOX = '44.20,33.45,44.55,33.20';
@@ -682,14 +682,18 @@ let sheetCleanup = null;
 let VIEW = null;
 function refreshView() {
   if (!VIEW || $('#sheet').hidden) return;
-  const sb = $('#sheetBody'), top = sb.scrollTop, v = VIEW;
-  v.open(); VIEW = v; sb.scrollTop = top;
+  const top = $('#sheetBody').scrollTop, v = VIEW;
+  v.open(); VIEW = v; $('#sheetBody').scrollTop = top;
 }
 function openSheet(title, html, after) {
   if (sheetCleanup) { sheetCleanup(); sheetCleanup = null; }
   VIEW = null;
   $('#sheetTitle').textContent = title;
-  $('#sheetBody').innerHTML = html;
+  // a fresh body each time: listeners a previous panel added to it must not pile up
+  // (two listeners = one tap toggles a switch twice = nothing happens)
+  const old = $('#sheetBody'), fresh = old.cloneNode(false);
+  old.replaceWith(fresh);
+  fresh.innerHTML = html;
   $('#sheet').hidden = false; document.body.classList.add('sheet-open');
   $('#sheetBody').scrollTop = 0;
   if (after) sheetCleanup = after($('#sheetBody')) || null;
@@ -788,8 +792,8 @@ const PANELS = {
     `, body => {
       wireChips(body);
       const legend = () => {
-        const m = S.settings.heritageMode;
-        $('#hLegend', body).innerHTML = m === 'status'
+        const m = S.settings.heritageMode, el = $('#hLegend', body); if (!el) return;
+        el.innerHTML = m === 'status'
           ? `<span><i class="swatch" style="background:#9c3d16;border:3px solid #3ddc84"></i>موثّق (زرناه)</span><span><i class="swatch" style="background:#9c3d16;border:1px solid #ffe2c8"></i>بعد ما انوثّق</span><span><i class="swatch" style="background:#2e86ab"></i>مبنى عادي موثّق</span>`
           : m === 'condition' ? CONDITIONS.map(c => `<span><i class="swatch" style="background:${c[2]}"></i>${c[1]}</span>`).join('') + '<span><i class="swatch" style="background:#bbb"></i>غير مقيّم</span>'
           : m === 'height' ? FLOOR_RAMP.map(([k, c], i) => { const lo = i ? FLOOR_RAMP[i - 1][0] + 1 : 1; return `<span><i class="swatch" style="background:${c}"></i>${k === 99 ? lo + '+' : lo === k ? lo : lo + '–' + k} طابق</span>`; }).join('') + '<span><i class="swatch" style="background:#a99c8e"></i>غير معروف — سجّل عدد الطوابق بالموقع</span>' : '';
@@ -800,15 +804,16 @@ const PANELS = {
         if (bm) { setBasemap(bm.dataset.bm); $$('[data-bm]', body).forEach(b => b.classList.toggle('on', b === bm)); return; }
         const sw = e.target.closest('.switch'); if (!sw) return;
         const k = sw.dataset.key; ly[k] = !ly[k]; sw.classList.toggle('on', ly[k]); sw.setAttribute('aria-checked', ly[k]);
-        if (k === 'plan') { if (ly.plan) renderPlan(); $('#planOp', body).hidden = !ly.plan; }
+        if (k === 'plan') { if (ly.plan) renderPlan(); const po = $('#planOp', body); if (po) po.hidden = !ly.plan; }
         if (k === 'heritageLabels') renderHeritage();
         applyLayerVisibility(); saveSettings();
       });
-      $('#planOp input', body).oninput = e => { S.settings.planOpacity = +e.target.value; L_.plan?.setOpacity(S.settings.planOpacity); saveSettings(); };
-      $('.chips[data-name="hmode"]', body).addEventListener('change', () => {
+      const op = $('#planOp input', body);
+      if (op) op.oninput = e => { S.settings.planOpacity = +e.target.value; L_.plan?.setOpacity(S.settings.planOpacity); saveSettings(); };
+      $('.chips[data-name="hmode"]', body)?.addEventListener('change', () => {
         S.settings.heritageMode = chipVal(body, 'hmode') || 'plain'; restyleAll(); legend(); saveSettings();
       });
-      for (const k of ['point', 'line', 'polygon']) $(`.chips[data-name="cats-${k}"]`, body).addEventListener('change', () => {
+      for (const k of ['point', 'line', 'polygon']) $(`.chips[data-name="cats-${k}"]`, body)?.addEventListener('change', () => {
         const all = ['point', 'line', 'polygon'].flatMap(kk => CATS[kk].map(c => kk + ':' + c[0]));
         const on = new Set(['point', 'line', 'polygon'].flatMap(kk => chipVal(body, 'cats-' + kk)));
         S.settings.hiddenCats = all.filter(x => !on.has(x)); renderSurvey(); saveSettings();
@@ -2346,6 +2351,7 @@ setInterval(() => {
   if (watchId != null && !document.hidden && Date.now() - KF.lastCb > 60000 && Date.now() - KF.restartAt > 60000) watchGps();
   gpsChip();
 }, 10000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) cloudKick(800); });
 document.addEventListener('visibilitychange', () => {
   if (document.hidden || watchId == null) return;
   keepAwake();

@@ -28,7 +28,7 @@ const DAILY_PHOTOS_PER_DEVICE = 5000;
 const PHOTO_COLS = ['photoId', 'fileId', 'owner', 'created', 'device', 'synced', 'bytes', 'observer', 'lat', 'lng', 'link', 'name', 'thumb', 'previewId', 'deleted'];
 const MAX_THUMB_B64 = 45000;
 
-function doGet() { return out({ ok: true, service: 'site-survey-cloud', version: 7, open: OPEN_ACCESS }); }
+function doGet() { return out({ ok: true, service: 'site-survey-cloud', version: 8, open: OPEN_ACCESS }); }
 
 function doPost(e) {
   let req;
@@ -227,7 +227,8 @@ function getPhoto(req) {
 
 // ---- records: newest `updated` wins; `synced` (server clock) drives incremental pulls
 function putRecords(req) {
-  const sh = book().getSheetByName('records'), rows = columnMap(sh), t = now();
+  const sh = book().getSheetByName('records'), t = now();
+  let rows = null;
   let written = 0, hist = null;
   const encode = function (data, id) {
     let json = JSON.stringify(data);
@@ -238,7 +239,20 @@ function putRecords(req) {
     return json;
   };
   const keep = function (old) { hist = hist || historySheet(); hist.appendRow(old.concat([t, req.device || ''])); };
-  (req.records || []).slice(0, 100).forEach(function (r) {
+  let deleted = null;
+  const clean = function (data, old) {        // drop photos that were deleted / removed, keep the removal list
+    const a = data && (data.properties || data), o = old && (old.properties || old);
+    if (!a) return;
+    if (!deleted) {
+      deleted = {};
+      const ph = book().getSheetByName('photos'), n = ph.getLastRow();
+      if (n > 1) ph.getRange(2, 1, n - 1, PHOTO_COLS.length).getValues().forEach(function (v) { if (v[14]) deleted[v[0]] = 1; });
+    }
+    const rm = [].concat(a.removedPhotos || [], (o && o.removedPhotos) || []).filter(function (x, i, s) { return s.indexOf(x) === i; });
+    if (rm.length) a.removedPhotos = rm;
+    if (a.photos) a.photos = a.photos.filter(function (x) { return rm.indexOf(x) < 0 && !deleted[x]; });
+  };
+  withLock(function () { rows = columnMap(sh); (req.records || []).slice(0, 100).forEach(function (r) {
     if (!r || !r.id) return;
     const row = rows[r.id], photos = r.store === 'features' || r.store === 'heritage';
     if (row) {
@@ -248,19 +262,22 @@ function putRecords(req) {
       if (String(cur) >= String(r.updated || '')) {
         // an older edit: the newer record stays, but the photos the older one added are never lost
         if (!oldData || !mergePhotoLists(oldData, r.data)) return;
+        clean(oldData, r.data);
         keep(old);
         sh.getRange(row, 5, 1, 2).setValues([[t, encode(oldData, r.id)]]);
       } else {
         if (oldData) mergePhotoLists(r.data, oldData);
+        if (photos) clean(r.data, oldData);
         keep(old);
         sh.getRange(row, 2, 1, 5).setValues([[r.store, r.updated || '', req.device || '', t, encode(r.data, r.id)]]);
       }
     } else {
+      if (photos) clean(r.data, null);
       sh.appendRow([r.id, r.store, r.updated || '', req.device || '', t, encode(r.data, r.id)]);
       rows[r.id] = sh.getLastRow();
     }
     written++;
-  });
+  }); });
   if (written) bump();
   return { ok: true, written: written, now: t };
 }
