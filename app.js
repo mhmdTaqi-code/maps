@@ -3,7 +3,7 @@
 'use strict';
 
 // ---------------------------------------------------------------- constants
-const DATA_VERSION = '27';    // bump when files in data/ change (also in sw.js)
+const DATA_VERSION = '28';    // bump when files in data/ change (also in sw.js)
 const SITE_CENTER = [33.3387, 44.3935];
 const SITE_ZOOM = 17;
 const BAGHDAD_VIEWBOX = '44.20,33.45,44.55,33.20';
@@ -1471,7 +1471,8 @@ const BROKERS = [
 ];
 const MQTT_SRC = 'https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js';
 const TEAM_COLORS = ['#e6194b', '#3cb44b', '#4363d8', '#f58231', '#911eb4', '#42d4f4', '#f032e6', '#bfef45', '#469990', '#9a6324'];
-const TEAM = { code: null, key: null, topic: null, clients: [], up: new Set(), members: new Map(), lastSent: 0, lastPos: null, beat: null, tick: null };
+const TEAM = { code: null, key: null, topic: null, clients: [], up: new Set(), members: new Map(), lastSent: 0, lastPos: null, beat: null, tick: null,
+  lastMsg: null, g: { timer: null, busy: false, ok: 0, fail: 0, sent: 0 } };
 L_.team = L.featureGroup();
 map.createPane('teamPane').style.zIndex = 660;
 
@@ -1530,15 +1531,55 @@ function loadMqtt() {
 function teamDisconnect() {
   for (const c of TEAM.clients) { try { c.end(true); } catch {} }
   TEAM.clients = []; TEAM.up.clear(); updateTeamBadge();
+  clearTimeout(TEAM.g.timer); TEAM.g.timer = null;
 }
+
+// ---- backup channel: the team's own Apps Script. Public brokers are free and can go down; this one is
+// Google's. Every ~10 s (25 s while a broker is up) each phone posts its latest sealed position and gets
+// everyone else's back. Same end-to-end encryption — the script only stores ciphertext, for ≤ 6 h.
+function googleLocStart() {
+  clearTimeout(TEAM.g.timer);
+  TEAM.g.timer = setTimeout(googleLoc, 1500);
+}
+async function googleLoc() {
+  clearTimeout(TEAM.g.timer);
+  const ts = teamSettings();
+  if (!ts.code || !TEAM.topic || !cloudOn()) return;
+  const next = () => { TEAM.g.timer = setTimeout(googleLoc, document.hidden ? 30000 : TEAM.up.size ? 25000 : 10000); };
+  if (TEAM.g.busy || !navigator.onLine) return next();
+  TEAM.g.busy = true;
+  try {
+    const body = { action: 'loc', topic: TEAM.topic, id: deviceId };
+    if (ts.sharing && TEAM.lastMsg) { body.msg = TEAM.lastMsg; TEAM.g.sent = Date.now(); }
+    const j = await cloudCall(body, 20000);
+    TEAM.g.ok = Date.now(); TEAM.g.fail = 0;
+    for (const l of j.locs || []) if (l.id !== deviceId) await onTeamMessage(`${TEAM.topic}/${l.id}`, l.m);
+  } catch { TEAM.g.fail++; }
+  finally { TEAM.g.busy = false; updateTeamBadge(); next(); }
+}
+// sharing needs the app on screen (browsers pause GPS when the screen locks) — so keep the screen awake
+let shareLock = null;
+async function keepAwake() {
+  const want = teamSettings().sharing && document.visibilityState === 'visible';
+  if (want && !shareLock) { try { shareLock = await navigator.wakeLock?.request('screen'); shareLock?.addEventListener('release', () => { shareLock = null; }); } catch {} }
+  else if (!want && shareLock) { try { await shareLock.release(); } catch {} shareLock = null; }
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden || !TEAM.topic) return;
+  keepAwake();                                                // wake locks drop when the app is hidden
+  if (teamSettings().sharing) teamPublish(true);
+  googleLoc();                                                // catch up right away
+});
 async function teamConnect() {
   const ts = teamSettings();
   teamDisconnect();
   if (!ts.code) return;
   if (!window.crypto?.subtle) { toast('مشاركة الموقع تحتاج رابط آمن (https)'); return; }
-  let mq;
-  try { mq = await loadMqtt(); } catch { toast('تعذّر تحميل أداة الاتصال — تأكد من النت'); return; }
   Object.assign(TEAM, await teamKeys(ts.code), { code: normCode(ts.code) });
+  googleLocStart();
+  keepAwake();
+  let mq;
+  try { mq = await loadMqtt(); } catch { updateTeamBadge(); return; }       // Google channel still carries positions
   const myTopic = `${TEAM.topic}/${deviceId}`;
   // if the phone drops off, brokers tell the team (last will) instead of showing a frozen dot
   const will = ts.sharing ? { topic: myTopic, payload: await seal({ off: 1, n: S.settings.observer, t: Date.now() }), qos: 0, retain: true } : undefined;
@@ -1564,25 +1605,29 @@ async function onTeamMessage(topic, payload) {
   // last will ("connection dropped"): its timestamp is from when that phone connected, so it is older than
   // the positions sent since — apply it to the last known position instead of comparing times
   if (m.off) { if (cur && !cur.off) { cur.off = true; cur.offAt = Date.now(); renderTeam(); } return; }
-  if (cur && cur.t >= m.t && !cur.off) return;                                 // same message via another broker
+  if (cur && cur.t >= m.t) return;                                            // same message via another channel
   TEAM.members.set(id, { ...m, id, off: false });
   renderTeam();
 }
 async function teamPublish(force) {
   const ts = teamSettings();
-  if (!ts.sharing || !S.me || !TEAM.key || !TEAM.up.size) return;
+  if (!ts.sharing || !S.me || !TEAM.key) return;
   const now = Date.now();
   const moved = TEAM.lastPos ? map.distance(TEAM.lastPos, [S.me.lat, S.me.lng]) : Infinity;
   if (!force && (now - TEAM.lastSent < 5000 || (moved < 8 && now - TEAM.lastSent < 30000))) return;
   TEAM.lastSent = now; TEAM.lastPos = [S.me.lat, S.me.lng];
   const msg = await seal({ n: S.settings.observer || 'بدون اسم', c: myColor(), la: +S.me.lat.toFixed(6), lo: +S.me.lng.toFixed(6),
     a: Math.round(S.me.acc), h: S.me.heading != null ? Math.round(S.me.heading) : null, t: now });
+  TEAM.lastMsg = msg;
   for (const c of TEAM.clients) if (c.connected) c.publish(`${TEAM.topic}/${deviceId}`, msg, { qos: 0, retain: true });
+  if (!TEAM.up.size && now - TEAM.g.sent > 8000) googleLoc();   // no broker: don't wait for the next Google round
 }
 async function teamStopSharing() {
   // clear our retained position so nobody sees a stale dot, then reconnect without a last will
   for (const c of TEAM.clients) if (c.connected) c.publish(`${TEAM.topic}/${deviceId}`, '', { qos: 0, retain: true });
-  await new Promise(r => setTimeout(r, 400));
+  TEAM.lastMsg = null;
+  if (TEAM.topic && cloudOn()) { try { await cloudCall({ action: 'loc', topic: TEAM.topic, id: deviceId, msg: '' }, 8000); } catch {} }
+  else await new Promise(r => setTimeout(r, 400));
 }
 
 // ---- map
@@ -1631,21 +1676,29 @@ function renderTeam() {
   updateTeamBadge();
   if (!$('#sheet').hidden && $('#sheet').dataset.panel === 'team') renderTeamList();
 }
+const googleUp = () => TEAM.g.ok && Date.now() - TEAM.g.ok < 70000;
+function teamStatusHtml() {
+  if (!TEAM.code) return '';
+  const live = TEAM.up.size ? `✓ مباشر (${TEAM.up.size} من ${BROKERS.length} خوادم)` : '✗ المباشر مقطوع';
+  const g = googleUp() ? '✓ احتياطي Google' : TEAM.g.fail ? '✗ احتياطي Google' : '⏳ احتياطي Google';
+  const any = TEAM.up.size || googleUp();
+  return `${any ? '<span class="dot-live"></span> ' : '⚠ '}${live} · ${g}${any ? '' : ' — جاري إعادة الاتصال…'}`;
+}
 function updateTeamBadge() {
   const st = $('#teamStatus');
-  if (st) st.innerHTML = TEAM.code ? (TEAM.up.size ? `<span class="dot-live"></span> متصل (${TEAM.up.size} من ${BROKERS.length} خوادم: ${[...TEAM.up].join('، ')})` : '⏳ جاري الاتصال…') : '';
+  if (st) st.innerHTML = teamStatusHtml();
   const b = $('#btnTeam'); if (!b) return;
   const live = [...TEAM.members.values()].filter(m => !m.off && Date.now() - m.t < 120000).length;   // fresh = < 2 min
   b.classList.toggle('on', !!teamSettings().sharing);
   b.dataset.count = live || '';
-  b.title = TEAM.code ? `الفريق — متصل بـ ${TEAM.up.size} خادم` : 'الفريق';
+  b.title = TEAM.code ? `الفريق — ${[TEAM.up.size && 'مباشر', googleUp() && 'Google'].filter(Boolean).join(' + ') || 'جاري الاتصال'}` : 'الفريق';
 }
 
 // ---- panel
 function renderTeamList() {
   const el = $('#teamList'); if (!el) return;
   const st = $('#teamStatus');
-  if (st) st.innerHTML = TEAM.code ? (TEAM.up.size ? `<span class="dot-live"></span> متصل (${TEAM.up.size} من ${BROKERS.length} خوادم: ${[...TEAM.up].join('، ')})` : '⏳ جاري الاتصال…') : '';
+  if (st) st.innerHTML = teamStatusHtml();
   const arr = [...TEAM.members.values()].sort((a, b) => b.t - a.t);
   el.innerHTML = arr.length ? arr.map(m => `<div class="list-item" data-mate="${esc(m.id)}">
       <div class="thumb" style="background:${m.c}"><b style="color:#fff">${esc(initials(m.n))}</b></div>
@@ -1681,10 +1734,10 @@ function openTeam() {
     <div class="team-code"><span>كود الفريق</span><b dir="ltr">${esc(ts.code)}</b></div>
     <div class="row" style="margin:8px 0"><button class="btn primary" id="tShare">إرسال الكود للأصدقاء</button><button class="btn" id="tCopy">نسخ الرابط</button></div>
     <label class="f"><span>اسمك (يشوفه الفريق)</span><input id="tName" value="${esc(S.settings.observer)}" placeholder="مثلاً: محمد تقي"></label>
-    ${swHtml('sharing', 'شارك موقعي مع الفريق', 'يشتغل والتطبيق مفتوح — قفل الشاشة يوقفه', ts.sharing, `background:${myColor()};border-radius:50%`)}
+    ${swHtml('sharing', 'شارك موقعي مع الفريق', 'الشاشة تبقى شغّالة وأنت تشارك — إذا قفلتها يوقف لحد ما ترجع للتطبيق', ts.sharing, `background:${myColor()};border-radius:50%`)}
     ${swHtml('viewing', 'اعرض الفريق على الخريطة', '', ts.viewing)}
     <h3>الأعضاء</h3><div id="teamList"></div>
-    <hr><p class="muted">🔒 المواقع مشفّرة من التلفون للتلفون بكود الفريق — الخوادم العامة اللي تنقلها ما تكدر تقراها. أي واحد عنده الكود يشوف المواقع، فلا تنشروه برّه الفريق. لمن توقف المشاركة ينمسح موقعك.</p>
+    <hr><p class="muted">🔒 المواقع تنتقل بطريقين بنفس الوقت: خوادم مباشرة (أسرع) وسكربت Google مال الفريق (احتياطي إذا وكعت الخوادم). مشفّرة من التلفون للتلفون بكود الفريق — محد بالطريق يكدر يقراها. أي واحد عنده الكود يشوف المواقع، فلا تنشروه برّه الفريق. لمن توقف المشاركة ينمسح موقعك.</p>
     <button class="btn danger block" id="tLeave">مغادرة الفريق</button>` : `
     <p class="muted" style="margin-top:0">شوفوا بعض على الخريطة وأنتم بالسايت. واحد يسوّي فريق ويدز الكود للباقين.</p>
     <label class="f"><span>اسمك (يشوفه الفريق)</span><input id="tName" value="${esc(S.settings.observer)}" placeholder="مثلاً: محمد تقي"></label>
@@ -1716,6 +1769,7 @@ function openTeam() {
             if (ts.sharing) await teamStopSharing();
             ts.sharing = !ts.sharing; saveSettings();
             if (ts.sharing) { startGps(); toast('موقعك صار يطلع للفريق'); } else toast('وقفت مشاركة موقعك');
+            keepAwake();
             await teamConnect();                       // reconnect so the last-will matches the new state
           } else { ts.viewing = !ts.viewing; saveSettings(); renderTeam(); }
           sw.classList.toggle('on', !!ts[k]); sw.setAttribute('aria-checked', !!ts[k]);

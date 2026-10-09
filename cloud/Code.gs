@@ -28,7 +28,7 @@ const DAILY_PHOTOS_PER_DEVICE = 5000;
 const PHOTO_COLS = ['photoId', 'fileId', 'owner', 'created', 'device', 'synced', 'bytes', 'observer', 'lat', 'lng', 'link', 'name', 'thumb', 'previewId'];
 const MAX_THUMB_B64 = 45000;
 
-function doGet() { return out({ ok: true, service: 'site-survey-cloud', version: 3, open: OPEN_ACCESS }); }
+function doGet() { return out({ ok: true, service: 'site-survey-cloud', version: 4, open: OPEN_ACCESS }); }
 
 function doPost(e) {
   let req;
@@ -46,6 +46,7 @@ function doPost(e) {
       case 'getPhoto': return out(getPhoto(req));
       case 'putRecords': return out(withLock(() => putRecords(req)));
       case 'pull': return out(pull(req));
+      case 'loc': return out(loc(req));
       default: return out({ ok: false, error: 'unknown action' });
     }
   } catch (err) {
@@ -228,6 +229,27 @@ function pull(req) {
     if (String(v[5]) > since) photos.push({ id: v[0], fileId: v[1], owner: v[2], created: v[3], device: v[4], observer: v[7], thumb: v[12] || '' });
   });
   return { ok: true, records: records, photos: photos, now: t };
+}
+
+// ---- live locations, backup channel (the app also uses public MQTT brokers; this keeps working if they fail).
+// Positions live only in the script cache (fast, expire by themselves) and are end-to-end encrypted by the
+// app — this script only ever sees ciphertext. msg '' = that person stopped sharing.
+function loc(req) {
+  const topic = clean(req.topic).slice(0, 80);
+  if (!topic) return { ok: false, error: 'no topic' };
+  const cache = CacheService.getScriptCache(), key = 'loc:' + topic, t = Date.now();
+  const read = () => { try { return JSON.parse(cache.get(key) || '{}'); } catch (e) { return {}; } };
+  let all;
+  if (req.id && typeof req.msg === 'string' && req.msg.length < 4000) {
+    all = withLock(() => {
+      const a = read();
+      a[clean(req.id).slice(0, 40)] = { m: req.msg, t: t };
+      for (const k in a) if (t - a[k].t > 6 * 3600 * 1000) delete a[k];
+      cache.put(key, JSON.stringify(a), 21600);
+      return a;
+    });
+  } else all = read();
+  return { ok: true, now: t, locs: Object.keys(all).map(k => ({ id: k, m: all[k].m, age: t - all[k].t })) };
 }
 
 // ---- setup (run from the editor): creates folder + sheet; with OPEN_ACCESS = false also a key + join link

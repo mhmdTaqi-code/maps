@@ -4,7 +4,7 @@
 //  - versioned app files, data and pinned CDN libraries: precached, cache first (URLs change per version)
 //  - map tiles: cache-first, capped so the phone's storage doesn't fill up
 // Bump VERSION whenever app.js / app.css / index.html / data/* change (keep DATA_VERSION in app.js in sync).
-const VERSION = '27';
+const VERSION = '28';
 const SHELL = `shell-v${VERSION}`, TILES = 'tiles-v1', TILE_LIMIT = 4000;
 const TILE_HOSTS = ['server.arcgisonline.com', 'tile.openstreetmap.org', 'basemaps.cartocdn.com'];
 const DATA = ['heritage', 'buildings', 'streets', 'site', 'landmarks', 'context_buildings', 'cad_contours', 'places', 'heritage_points'].map(n => `data/${n}.json?v=${VERSION}`);
