@@ -3,7 +3,7 @@
 'use strict';
 
 // ---------------------------------------------------------------- constants
-const DATA_VERSION = '19';    // bump when files in data/ change (also in sw.js)
+const DATA_VERSION = '20';    // bump when files in data/ change (also in sw.js)
 const SITE_CENTER = [33.3387, 44.3935];
 const SITE_ZOOM = 17;
 const BAGHDAD_VIEWBOX = '44.20,33.45,44.55,33.20';
@@ -497,11 +497,13 @@ async function putFeature(f) {
   f.properties.updated = nowIso();
   S.features.set(f.properties.id, f);
   await DB.put('features', { id: f.properties.id, feature: f });
+  cloudKick();
 }
 async function putHeritage(rec) {
   rec.updated = nowIso();
   S.heritage.set(rec.id, rec);
   await DB.put('heritage', rec);
+  cloudKick();
 }
 
 // ---------------------------------------------------------------- photos
@@ -538,7 +540,11 @@ async function photoUrl(id, thumb = true) {
   const key = id + (thumb ? ':t' : '');
   if (S.urls.has(key)) return S.urls.get(key);
   const p = await DB.get('photos', id); if (!p) return '';
-  const u = URL.createObjectURL(thumb ? p.thumb : p.blob); S.urls.set(key, u); return u;
+  let b = thumb ? (p.thumb || p.blob) : p.blob;
+  // a teammate's photo that is only in the cloud: download once, then it is on this phone too
+  if (!b && p.cloud && cloudOn()) { try { b = await cloudPhotoBlob(p, thumb); } catch { return ''; } }
+  if (!b) return '';
+  const u = URL.createObjectURL(b); S.urls.set(key, u); return u;
 }
 function pickPhotos(capture) {
   return new Promise(res => {
@@ -775,6 +781,20 @@ const PANELS = {
         <button class="btn" id="exCsv">CSV (لـ Excel)</button>
       </div>
       <div class="row" style="margin-top:8px"><button class="btn" id="imp">استيراد ملف ZIP / GeoJSON</button></div>
+      <h3>☁️ المزامنة السحابية (Google Drive)</h3>
+      <p class="muted" id="cloudStatus" style="margin-top:0">${cloudStatusHtml()}</p>
+      <label class="f"><span>رابط السكربت (Web app URL)</span><input id="cUrl" dir="ltr" placeholder="https://script.google.com/macros/s/…/exec" value="${esc(cloudCfg().url)}"></label>
+      <label class="f"><span>كلمة السر (SYNC_KEY)</span><input id="cKey" dir="ltr" type="password" value="${esc(cloudCfg().key)}"></label>
+      <div class="row"><button class="btn primary" id="cTest">حفظ واختبار</button><button class="btn" id="cNow">زامن هسه</button></div>
+      <details class="howto"><summary>شلون أفعّلها؟ (مرة وحدة، 3 دقايق، مجاناً)</summary>
+        <ol>
+          <li>افتح <a href="https://script.google.com/home/projects/create" target="_blank" rel="noopener">script.google.com</a> بحساب Google (حساب الجامعة إذا مساحته أكبر).</li>
+          <li>امسح الموجود والصق كود <a href="https://github.com/mhmdTaqi-code/maps/blob/main/cloud/Code.gs" target="_blank" rel="noopener">Code.gs</a>، وغيّر <code>SYNC_KEY</code> لكلمة سر طويلة.</li>
+          <li>Deploy ← New deployment ← Web app ← Execute as: <b>Me</b> ← Who has access: <b>Anyone</b> ← Deploy، ووافق على الصلاحيات.</li>
+          <li>انسخ رابط الـ Web app والصقه هنا ويه كلمة السر، ودوس «حفظ واختبار». ودزّ نفس الرابط والكلمة للفريق.</li>
+        </ol>
+        <p>الصور تنحفظ بمجلد «مسح السايت» بـ Drive مالتك، كل مبنى بمجلد، والسجل بجدول Google Sheets بنفس المجلد. محد يكدر يوصلها بدون كلمة السر.</p>
+      </details>
       <h3>التخزين على هذا الجهاز</h3>
       <p class="muted" id="storageInfo">جاري الحساب…</p>
       <h3>العمل بدون انترنت</h3>
@@ -800,6 +820,19 @@ const PANELS = {
       $('#calib', body).onclick = () => { closeSheet(); openCalibration(); };
       $('#wipe', body).onclick = wipeAll;
       storageInfo($('#storageInfo', body));
+      $('#cTest', body).onclick = async e => {
+        const c = cloudCfg(); c.url = $('#cUrl', body).value.trim(); c.key = $('#cKey', body).value.trim();
+        if (!/^https:\/\//.test(c.url) || !c.key) return toast('اكتب الرابط وكلمة السر');
+        await saveSettings(); e.target.disabled = true; $('#cloudStatus', body).textContent = '⏳ جاري الاختبار…';
+        try {
+          const j = await cloudCall({ action: 'ping' }, 30000);
+          const gb = v => (v / 1073741824).toFixed(1) + ' GB';
+          $('#cloudStatus', body).innerHTML = `✓ متصل بـ Drive — المساحة ${gb(j.used)} من ${j.limit ? gb(j.limit) : 'غير محدودة'} · بالسحابة ${j.photos} صورة و ${j.records} سجل · <a href="${esc(j.folder)}" target="_blank" rel="noopener">فتح المجلد</a>`;
+          cloudStart();
+        } catch (err) { $('#cloudStatus', body).textContent = '⚠ ما اشتغل: ' + (err.message === 'bad key' ? 'كلمة السر غلط' : err.message); }
+        e.target.disabled = false;
+      };
+      $('#cNow', body).onclick = () => { if (!cloudOn()) return toast('فعّل المزامنة أول'); cloudSync(); };
       $('.chips[data-name="theme"]', body).addEventListener('change', () => { S.settings.theme = chipVal(body, 'theme') || 'auto'; applyTheme(); saveSettings(); });
     });
   },
@@ -966,6 +999,7 @@ async function openFeature(id) {
     $('#del', body).onclick = async () => {
       if (!confirm(`حذف «${p.name || label}» نهائياً؟`)) return;
       S.features.delete(id); await DB.del('features', id);
+      await DB.put('meta', { id: 'del:' + id, updated: nowIso() }); cloudKick();     // tell teammates' phones too
       for (const ph of p.photos || []) await DB.del('photos', ph);
       renderSurvey(); closeSheet(); toast('انحذف');
     };
@@ -1467,20 +1501,42 @@ function agoTxt(t) {
   return s < 45 ? 'هسه' : s < 3600 ? `قبل ${Math.round(s / 60)} د` : `قبل ${Math.round(s / 3600)} س`;
 }
 const initials = n => (n || '؟').trim().split(/\s+/).map(w => w[0]).slice(0, 2).join('');
+const mateLayers = new Map();   // member id -> { mk, circle, key }
+function glide(mk, to, ms = 1200) {
+  const from = mk.getLatLng(), t0 = performance.now();
+  if (from.distanceTo(to) > 300 || document.hidden) return mk.setLatLng(to);   // big jumps: no animation
+  cancelAnimationFrame(mk._glide);
+  const stepFn = now => {
+    const k = Math.min(1, (now - t0) / ms), e = k * (2 - k);
+    mk.setLatLng([from.lat + (to[0] - from.lat) * e, from.lng + (to[1] - from.lng) * e]);
+    if (k < 1) mk._glide = requestAnimationFrame(stepFn);
+  };
+  mk._glide = requestAnimationFrame(stepFn);
+}
 function renderTeam() {
-  L_.team.clearLayers();
   const ts = teamSettings();
-  for (const [id, m] of TEAM.members) {
-    const age = (Date.now() - m.t) / 1000;
-    if (age > 6 * 3600) { TEAM.members.delete(id); continue; }
-    if (!ts.viewing || m.la == null) continue;
-    const stale = m.off || age > 120, cls = `mate${stale ? ' stale' : ''}`;
-    if (!stale && m.a && m.a < 80) L.circle([m.la, m.lo], { radius: m.a, color: m.c, weight: 1, fillColor: m.c, fillOpacity: .08, interactive: false, pane: 'teamPane' }).addTo(L_.team);
-    const mk = L.marker([m.la, m.lo], { pane: 'teamPane', zIndexOffset: 900,
-      icon: L.divIcon({ className: '', html: `<div class="${cls}" style="--c:${m.c}">${m.h != null && !stale ? `<i class="mate-hd" style="transform:rotate(${m.h}deg)"></i>` : ''}<span>${esc(initials(m.n))}</span></div>`, iconSize: [30, 30], iconAnchor: [15, 15] }) });
-    mk.bindTooltip(`${esc(m.n)} · ${m.off ? 'انقطع ' + agoTxt(m.t) : agoTxt(m.t)}`, { permanent: true, direction: 'top', offset: [0, -16], className: 'lbl lbl-mate' });
-    mk.on('click', () => openTeam());
-    L_.team.addLayer(mk);
+  for (const [id, m] of TEAM.members) if ((Date.now() - m.t) / 1000 > 6 * 3600) TEAM.members.delete(id);
+  for (const [id, L0] of mateLayers) if (!TEAM.members.has(id) || !ts.viewing) { L_.team.removeLayer(L0.mk); if (L0.circle) L_.team.removeLayer(L0.circle); mateLayers.delete(id); }
+  if (ts.viewing) for (const [id, m] of TEAM.members) {
+    if (m.la == null) continue;
+    const age = (Date.now() - m.t) / 1000, stale = m.off || age > 120;
+    const key = `${m.c}|${stale}|${m.h}|${m.n}`;
+    let L0 = mateLayers.get(id);
+    const icon = () => L.divIcon({ className: '', html: `<div class="mate${stale ? ' stale' : ''}" style="--c:${m.c}">${m.h != null && !stale ? `<i class="mate-hd" style="transform:rotate(${m.h}deg)"></i>` : ''}<span>${esc(initials(m.n))}</span></div>`, iconSize: [30, 30], iconAnchor: [15, 15] });
+    if (!L0) {
+      const mk = L.marker([m.la, m.lo], { pane: 'teamPane', zIndexOffset: 900, icon: icon() });
+      mk.bindTooltip('', { permanent: true, direction: 'top', offset: [0, -16], className: 'lbl lbl-mate' });
+      mk.on('click', () => openTeam());
+      L0 = { mk, circle: null, key }; mateLayers.set(id, L0); L_.team.addLayer(mk);
+    } else {
+      if (L0.key !== key) { L0.mk.setIcon(icon()); L0.key = key; }
+      glide(L0.mk, [m.la, m.lo]);
+    }
+    L0.mk.setTooltipContent(`${esc(m.n)} · ${m.off ? 'انقطع ' + agoTxt(m.t) : agoTxt(m.t)}`);
+    const showC = !stale && m.a && m.a < 80;
+    if (showC && !L0.circle) { L0.circle = L.circle([m.la, m.lo], { radius: m.a, color: m.c, weight: 1, fillColor: m.c, fillOpacity: .08, interactive: false, pane: 'teamPane' }); L_.team.addLayer(L0.circle); }
+    else if (!showC && L0.circle) { L_.team.removeLayer(L0.circle); L0.circle = null; }
+    if (L0.circle) L0.circle.setLatLng([m.la, m.lo]).setRadius(m.a);
   }
   updateTeamBadge();
   if (!$('#sheet').hidden && $('#sheet').dataset.panel === 'team') renderTeamList();
@@ -1581,6 +1637,113 @@ async function teamFromLink() {
   if (ts.sharing) await teamStopSharing();
   Object.assign(ts, { code, sharing: false, viewing: true }); saveSettings();
   await teamConnect(); openTeam();
+}
+
+
+// ---------------------------------------------------------------- team cloud: Google Drive via the user's Apps Script
+// Photos are uploaded once (sequentially, resumable), records are pushed when they change and pulled
+// from teammates. Remote photos are fetched on demand through the script and kept on the device.
+const CLOUD = { busy: false, timer: null, debounce: null, state: '', err: '', up: 0, upTotal: 0, lastOk: 0 };
+const cloudCfg = () => (S.settings.cloud ||= { url: '', key: '', lastPull: '', lastPush: '' });
+const cloudOn = () => { const c = cloudCfg(); return !!(c.url && c.key); };
+async function cloudCall(body, timeoutMs = 60000) {
+  const c = cloudCfg();
+  const ctl = new AbortController(), to = setTimeout(() => ctl.abort(), timeoutMs);
+  try {
+    // text/plain keeps it a "simple" request (no CORS preflight) — Apps Script answers through a redirect
+    const r = await fetch(c.url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ ...body, key: c.key, device: deviceId }), signal: ctl.signal, redirect: 'follow' });
+    const j = await r.json();
+    if (!j.ok) throw new Error(j.error || 'cloud error');
+    return j;
+  } finally { clearTimeout(to); }
+}
+const blobToB64 = blob => new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(',')[1]); fr.onerror = rej; fr.readAsDataURL(blob); });
+const b64ToBlob = (b, mime) => new Blob([Uint8Array.from(atob(b), c => c.charCodeAt(0))], { type: mime });
+function setCloudState(state, err = '') { CLOUD.state = state; CLOUD.err = err; const el = $('#cloudStatus'); if (el) el.innerHTML = cloudStatusHtml(); updateCloudBadge(); }
+function cloudStatusHtml() {
+  if (!cloudOn()) return 'غير مفعّلة — الصور تبقى على هذا التلفون بس.';
+  const ago = CLOUD.lastOk ? agoTxt(CLOUD.lastOk) : '—';
+  const up = CLOUD.upTotal ? ` · رفع الصور ${CLOUD.up}/${CLOUD.upTotal}` : '';
+  return { idle: `✓ متزامن · آخر مزامنة ${ago}`, sync: `⏳ جاري المزامنة${up}`, offline: '📴 بدون نت — راح تتزامن لمن يرجع', error: `⚠ ${esc(CLOUD.err)} — راح يعيد المحاولة` }[CLOUD.state] || `آخر مزامنة ${ago}`;
+}
+function updateCloudBadge() {
+  const b = document.querySelector('.dock [data-panel="more"]'); if (!b) return;
+  b.classList.toggle('cloud-sync', CLOUD.state === 'sync');
+  b.classList.toggle('cloud-err', CLOUD.state === 'error');
+}
+// which record owns a photo → its Drive sub-folder ("HP20 خان مرجان الاثري")
+function photoOwners() {
+  const m = new Map();
+  for (const f of S.features.values()) for (const ph of f.properties.photos || []) m.set(ph, `${f.properties.name || catOf(f.properties.kind, f.properties.category)[1]} (${f.properties.id})`);
+  for (const r of S.heritage.values()) for (const ph of r.photos || []) m.set(ph, `${r.id} ${buildingTitle(r.id, r)}`);
+  return m;
+}
+
+async function cloudSync() {
+  if (!cloudOn() || CLOUD.busy) return;
+  if (!navigator.onLine) return setCloudState('offline');
+  CLOUD.busy = true; setCloudState('sync');
+  const c = cloudCfg();
+  try {
+    // 1) push changed records (features, building records, deletions)
+    const recs = [];
+    for (const f of S.features.values()) if ((f.properties.updated || '') > (c.lastPush || '')) recs.push({ id: f.properties.id, store: 'features', updated: f.properties.updated, data: f });
+    for (const r of S.heritage.values()) if ((r.updated || '') > (c.lastPush || '')) recs.push({ id: r.id, store: 'heritage', updated: r.updated, data: r });
+    for (const d of await DB.all('meta')) if (d.id.startsWith('del:') && (d.updated || '') > (c.lastPush || '')) recs.push({ id: d.id.slice(4), store: 'deleted', updated: d.updated, data: { id: d.id.slice(4) } });
+    for (let i = 0; i < recs.length; i += 40) await cloudCall({ action: 'putRecords', records: recs.slice(i, i + 40) });
+    if (recs.length) { c.lastPush = recs.reduce((a, r) => (r.updated > a ? r.updated : a), c.lastPush || ''); await saveSettings(); }
+
+    // 2) upload photos that are only on this phone (one at a time; resumes after a reload)
+    const owners = photoOwners();
+    const pending = (await DB.all('photos')).filter(p => p.blob && !p.cloud);
+    CLOUD.upTotal = pending.length; CLOUD.up = 0;
+    for (const p of pending) {
+      if (!navigator.onLine) throw new Error('انقطع النت');
+      const j = await cloudCall({ action: 'putPhoto', id: p.id, mime: p.blob.type || 'image/jpeg', data: await blobToB64(p.blob), owner: owners.get(p.id) || '',
+        meta: { created: p.created, observer: p.observer, lat: p.lat, lng: p.lng, name: p.name } }, 120000);
+      p.cloud = j.fileId; await DB.put('photos', p);
+      CLOUD.up++; setCloudState('sync');
+    }
+    CLOUD.upTotal = 0;
+
+    // 3) pull teammates' changes (2-minute overlap covers writes that raced the previous pull)
+    const since = c.lastPull ? new Date(new Date(c.lastPull).getTime() - 120000).toISOString() : '';
+    const j = await cloudCall({ action: 'pull', since });
+    const feats = j.records.filter(r => r.store === 'features').map(r => r.data);
+    const hers = j.records.filter(r => r.store === 'heritage').map(r => r.data);
+    let changed = (await mergeFeatures(feats)) + (await mergeHeritage(hers));
+    for (const r of j.records.filter(r => r.store === 'deleted')) {
+      if (S.features.has(r.id)) { S.features.delete(r.id); await DB.del('features', r.id); changed++; }
+    }
+    for (const ph of j.photos) {
+      const cur = await DB.get('photos', ph.id);
+      if (!cur) await DB.put('photos', { id: ph.id, cloud: ph.fileId, remote: true, created: ph.created });
+      else if (!cur.cloud) { cur.cloud = ph.fileId; await DB.put('photos', cur); }
+    }
+    c.lastPull = j.now; await saveSettings();
+    if (changed) { renderSurvey(); renderHeritage(); renderHeritagePoints(); }
+    CLOUD.lastOk = Date.now(); setCloudState('idle');
+  } catch (e) {
+    setCloudState(navigator.onLine ? 'error' : 'offline', e.name === 'AbortError' ? 'الخادم بطيء' : e.message);
+  } finally { CLOUD.busy = false; }
+}
+// run soon after a local change, and every 2 minutes in the background
+function cloudKick(delay = 4000) { if (!cloudOn()) return; clearTimeout(CLOUD.debounce); CLOUD.debounce = setTimeout(cloudSync, delay); }
+function cloudStart() {
+  clearInterval(CLOUD.timer);
+  if (!cloudOn()) return setCloudState('');
+  CLOUD.timer = setInterval(cloudSync, 120000);
+  cloudKick(1500);
+}
+addEventListener('online', () => cloudKick(1000));
+
+// a photo that lives only in the cloud (taken by a teammate): fetch through the script and keep it
+async function cloudPhotoBlob(p, thumb) {
+  const j = await cloudCall({ action: 'getPhoto', fileId: p.cloud, thumb }, 90000);
+  const blob = b64ToBlob(j.data, j.mime);
+  if (thumb) p.thumb = blob; else { p.blob = blob; if (!p.thumb) p.thumb = blob; }
+  await DB.put('photos', p);
+  return blob;
 }
 
 // ---------------------------------------------------------------- analysis
@@ -1887,7 +2050,7 @@ async function exportZip(share) {
   zip.file('calibration.json', JSON.stringify(S.calib));
   zip.file('survey.csv', '﻿' + csvText());
   const ids = new Set([...feats.flatMap(f => f.properties.photos || []), ...heritageRecs.flatMap(r => r.photos || [])]);
-  for (const id of ids) { const p = await DB.get('photos', id); if (p) zip.file(`photos/${id}.${photoExt(p.blob.type)}`, p.blob); }
+  for (const id of ids) { const p = await DB.get('photos', id); if (p?.blob) zip.file(`photos/${id}.${photoExt(p.blob.type)}`, p.blob); }
   zip.file('photos_meta.json', JSON.stringify(await Promise.all([...ids].map(async id => { const p = await DB.get('photos', id); return p && { id, created: p.created, lat: p.lat, lng: p.lng, observer: p.observer }; }))));
   const blob = await zip.generateAsync({ type: 'blob' }, m => toast(`تجهيز الملف ${Math.round(m.percent)}% (${ids.size} صورة)`, 60000));
   const name = `site-survey_${who()}_${stamp()}.zip`;
@@ -2080,10 +2243,15 @@ $('#btnSite').onclick = () => map.flyTo(SITE_CENTER, SITE_ZOOM);
   L_.team.addTo(map);
   if (teamSettings().code) { teamConnect(); if (teamSettings().sharing) startGps(); }
   teamFromLink();
+  cloudStart();
   $$('.modes button').forEach(b => b.classList.toggle('on', b.dataset.mode === S.settings.mode));
   applyLayerVisibility();
   if (navigator.storage?.persist) navigator.storage.persist().catch(() => {});
-  if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) navigator.serviceWorker.register('sw.js').catch(() => {});
+  if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+    const hadController = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController && !window.__reloading) { window.__reloading = true; location.reload(); } });
+    navigator.serviceWorker.register('sw.js').then(r => r.update()).catch(() => {});
+  }
   if (!S.settings.observer) setTimeout(() => toast('من «المزيد» اكتب اسمك حتى يبين على رصدك', 4000), 1200);
 })();
 })();

@@ -310,3 +310,12 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
 .team-code span { color: var(--ink-2); font-size: 12.5px; }
 .team-code b { font-size: 20px; letter-spacing: 2px; font-family: ui-monospace, Consolas, monospace; }
 .dot-live { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #3ddc84; margin-inline-end: 4px; animation: blink 1.6s infinite; }
+
+/* ---------- cloud ---------- */
+.dock button.cloud-sync span::after, .dock button.cloud-err span::after { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-inline-start: 4px; vertical-align: middle; }
+.dock button.cloud-sync span::after { background: #1f9bd1; animation: blink 1s infinite; }
+.dock button.cloud-err span::after { background: #e0a020; }
+details.howto { background: var(--panel-2); border-radius: 12px; padding: 8px 12px; margin-top: 10px; font-size: 13px; line-height: 1.8; }
+details.howto summary { cursor: pointer; font-weight: 600; }
+details.howto ol { padding-inline-start: 18px; margin: 8px 0; }
+details.howto code { background: var(--panel); padding: 0 4px; border-radius: 4px; }
