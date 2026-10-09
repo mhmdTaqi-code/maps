@@ -28,7 +28,7 @@ const DAILY_PHOTOS_PER_DEVICE = 5000;
 const PHOTO_COLS = ['photoId', 'fileId', 'owner', 'created', 'device', 'synced', 'bytes', 'observer', 'lat', 'lng', 'link', 'name', 'thumb', 'previewId'];
 const MAX_THUMB_B64 = 45000;
 
-function doGet() { return out({ ok: true, service: 'site-survey-cloud', version: 5, open: OPEN_ACCESS }); }
+function doGet() { return out({ ok: true, service: 'site-survey-cloud', version: 6, open: OPEN_ACCESS }); }
 
 function doPost(e) {
   let req;
@@ -47,6 +47,7 @@ function doPost(e) {
       case 'putRecords': return out(withLock(() => putRecords(req)));
       case 'pull': return out(pull(req));
       case 'loc': return out(loc(req));
+      case 'epoch': return out({ ok: true, epoch: props().getProperty('EPOCH') || '' });
       default: return out({ ok: false, error: 'unknown action' });
     }
   } catch (err) {
@@ -134,6 +135,7 @@ function putThumb(req) {
     const row = photoRow(sh, req.id);
     if (row) { sh.getRange(row, 13).setValue(req.thumb); sh.getRange(row, 6).setValue(now()); }
     else sh.appendRow([req.id, '', clean(req.ownerName || req.owner), m.created || '', req.device || '', now(), '', clean(m.observer), m.lat || '', m.lng || '', '', clean(m.name), req.thumb, '']);
+    bump();
     return { ok: true };
   });
 }
@@ -170,6 +172,7 @@ function putPhoto(req) {
     if (row) sh.getRange(row, 1, 1, vals.length).setValues([vals]); else sh.appendRow(vals);
   });
   cache.put(qk, String(used + 1), 90000);
+  bump();
   return { ok: true, fileId: file.getId() };
 }
 // only files this script stored as survey photos can be read back.
@@ -195,30 +198,60 @@ function getPhoto(req) {
 function putRecords(req) {
   const sh = book().getSheetByName('records'), rows = columnMap(sh), t = now();
   let written = 0, hist = null;
-  (req.records || []).slice(0, 100).forEach(function (r) {
-    if (!r || !r.id) return;
-    let json = JSON.stringify(r.data);
+  const encode = function (data, id) {
+    let json = JSON.stringify(data);
     if (json.length > MAX_CELL) {      // very long GPS tracks: keep the record in a Drive file
-      const f = root().createFile(r.id + '.json', json, 'application/json');
+      const f = root().createFile(id + '.json', json, 'application/json');
       json = JSON.stringify({ __file: f.getId() });
     }
-    const row = rows[r.id];
+    return json;
+  };
+  const keep = function (old) { hist = hist || historySheet(); hist.appendRow(old.concat([t, req.device || ''])); };
+  (req.records || []).slice(0, 100).forEach(function (r) {
+    if (!r || !r.id) return;
+    const row = rows[r.id], photos = r.store === 'features' || r.store === 'heritage';
     if (row) {
-      const cur = sh.getRange(row, 3).getValue();
-      if (String(cur) >= String(r.updated || '')) return;
       // keep the version being replaced (edits and deletions can always be undone from «history»)
-      const old = sh.getRange(row, 1, 1, 6).getValues()[0];
-      hist = hist || historySheet();
-      hist.appendRow(old.concat([t, req.device || '']));
-      sh.getRange(row, 2, 1, 5).setValues([[r.store, r.updated || '', req.device || '', t, json]]);
+      const old = sh.getRange(row, 1, 1, 6).getValues()[0], cur = old[2];
+      const oldData = photos ? readJson(old[5]) : null;
+      if (String(cur) >= String(r.updated || '')) {
+        // an older edit: the newer record stays, but the photos the older one added are never lost
+        if (!oldData || !mergePhotoLists(oldData, r.data)) return;
+        keep(old);
+        sh.getRange(row, 5, 1, 2).setValues([[t, encode(oldData, r.id)]]);
+      } else {
+        if (oldData) mergePhotoLists(r.data, oldData);
+        keep(old);
+        sh.getRange(row, 2, 1, 5).setValues([[r.store, r.updated || '', req.device || '', t, encode(r.data, r.id)]]);
+      }
     } else {
-      sh.appendRow([r.id, r.store, r.updated || '', req.device || '', t, json]);
+      sh.appendRow([r.id, r.store, r.updated || '', req.device || '', t, encode(r.data, r.id)]);
       rows[r.id] = sh.getLastRow();
     }
     written++;
   });
+  if (written) bump();
   return { ok: true, written: written, now: t };
 }
+function readJson(cell) {
+  try {
+    let d = JSON.parse(cell);
+    if (d && d.__file) d = JSON.parse(DriveApp.getFileById(d.__file).getBlob().getDataAsString());
+    return d;
+  } catch (e) { return null; }
+}
+// add `from`'s photos to `into` (a feature keeps them in properties) unless someone removed them on purpose
+function mergePhotoLists(into, from) {
+  const a = into && (into.properties || into), b = from && (from.properties || from);
+  if (!a || !b || !b.photos || !b.photos.length) return false;
+  const gone = [].concat(a.removedPhotos || [], b.removedPhotos || []), have = a.photos || [];
+  const add = b.photos.filter(function (x) { return have.indexOf(x) < 0 && gone.indexOf(x) < 0; });
+  if (!add.length) return false;
+  a.photos = have.concat(add);
+  return true;
+}
+// change counter: the app's location poll carries it, so phones fetch new photos / records within seconds
+function bump() { CacheService.getScriptCache().put('rev', String(Date.now()), 21600); }
 function historySheet() {
   const ss = book();
   let h = ss.getSheetByName('history');
@@ -275,7 +308,25 @@ function loc(req) {
       return a;
     });
   } else all = read();
-  return { ok: true, now: t, locs: Object.keys(all).map(k => ({ id: k, m: all[k].m, age: t - all[k].t })) };
+  return { ok: true, now: t, rev: cache.get('rev') || '', locs: Object.keys(all).map(k => ({ id: k, m: all[k].m, age: t - all[k].t })) };
+}
+
+// ---- fresh start for a new survey (run from the editor). Nothing is deleted: the current folder (photos, sheet,
+// backups) is renamed as an archive, the app gets a new empty folder + sheet, and every phone drops its data from
+// before this moment the next time it syncs (EPOCH).
+function resetForNewSurvey() {
+  const p = props(), old = root(), day = now().slice(0, 10);
+  old.setName(ROOT_NAME + ' — أرشيف التجربة قبل ' + day);
+  ['ROOT', 'SHEET', 'PHOTOS', 'PREVIEWS', 'BACKUPS', 'BACKUP_DAY'].forEach(function (k) { p.deleteProperty(k); });
+  Object.keys(p.getProperties()).forEach(function (k) { if (k.indexOf('DIR_') === 0) p.deleteProperty(k); });
+  p.setProperty('EPOCH', 'E' + Date.now());
+  // the site team's shared live positions too
+  const h = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, 'ssm-topic:RUSAFAMAPS', Utilities.Charset.UTF_8);
+  const hex = h.slice(0, 12).map(function (b) { return ('0' + ((b + 256) % 256).toString(16)).slice(-2); }).join('');
+  CacheService.getScriptCache().removeAll(['loc:ssm-rusafa/' + hex, 'rev']);
+  const ss = book();
+  Logger.log('archived: ' + old.getName() + ' · new folder: ' + root().getUrl() + ' · new sheet: ' + ss.getUrl() + ' · topic ' + hex);
+  return 'ok';
 }
 
 // ---- setup (run from the editor): creates folder + sheet; with OPEN_ACCESS = false also a key + join link

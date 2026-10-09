@@ -3,7 +3,7 @@
 'use strict';
 
 // ---------------------------------------------------------------- constants
-const DATA_VERSION = '32';    // bump when files in data/ change (also in sw.js)
+const DATA_VERSION = '33';    // bump when files in data/ change (also in sw.js)
 const SITE_CENTER = [33.3387, 44.3935];
 const SITE_ZOOM = 17;
 const BAGHDAD_VIEWBOX = '44.20,33.45,44.55,33.20';
@@ -504,17 +504,25 @@ async function loadUserData() {
     if (m.id === 'calib') { const { id, ...rest } = m; S.calib = { ...S.calib, ...rest }; }
   }
 }
+// what this phone still has to upload (id -> store). Kept explicitly: comparing timestamps breaks as soon as
+// one phone's clock is off.
+const PENDING = { ids: null };
+async function pendingLoad() { if (!PENDING.ids) { const d = await DB.get('meta', 'pending').catch(() => null); if (d) PENDING.ids = d.ids; } return PENDING.ids; }
+async function pendingSave() { await DB.put('meta', { id: 'pending', ids: PENDING.ids || {} }); }
+async function markPending(id, store) { await pendingLoad(); (PENDING.ids ||= {})[id] = store; await pendingSave(); }
 async function putFeature(f) {
   f.properties.updated = nowIso();
   S.features.set(f.properties.id, f);
   await DB.put('features', { id: f.properties.id, feature: f });
-  cloudKick();
+  await markPending(f.properties.id, 'features');
+  cloudKick(1500);
 }
 async function putHeritage(rec) {
   rec.updated = nowIso();
   S.heritage.set(rec.id, rec);
   await DB.put('heritage', rec);
-  cloudKick();
+  await markPending(rec.id, 'heritage');
+  cloudKick(1500);
 }
 
 // ---------------------------------------------------------------- photos
@@ -637,8 +645,16 @@ function galStep(d) { GAL.i = (GAL.i + d + GAL.ids.length) % GAL.ids.length; sho
 
 // ---------------------------------------------------------------- sheet
 let sheetCleanup = null;
+// the record card on screen, so a teammate's new photos / edits show up in it without reopening
+let VIEW = null;
+function refreshView() {
+  if (!VIEW || $('#sheet').hidden) return;
+  const sb = $('#sheetBody'), top = sb.scrollTop, v = VIEW;
+  v.open(); VIEW = v; sb.scrollTop = top;
+}
 function openSheet(title, html, after) {
   if (sheetCleanup) { sheetCleanup(); sheetCleanup = null; }
+  VIEW = null;
   $('#sheetTitle').textContent = title;
   $('#sheetBody').innerHTML = html;
   $('#sheet').hidden = false; document.body.classList.add('sheet-open');
@@ -646,6 +662,7 @@ function openSheet(title, html, after) {
   if (after) sheetCleanup = after($('#sheetBody')) || null;
 }
 function closeSheet() {
+  VIEW = null;
   if (sheetCleanup) { sheetCleanup(); sheetCleanup = null; }
   $('#sheet').hidden = true; document.body.classList.remove('sheet-open');
   $$('.dock button').forEach(b => b.classList.remove('on'));
@@ -1052,7 +1069,8 @@ function editFeature(geometry, kind, existing) {
   openSheet(isNew ? 'تسجيل عنصر جديد' : 'تعديل', `<p class="muted" style="margin-top:0">${measureText({ type: 'Feature', geometry })}</p>` + featureForm(kind, p), body => {
     wireChips(body);
     const grid = $('#fph', body);
-    const redraw = () => renderPhotoGrid(grid, photos, id => { photos = photos.filter(x => x !== id); redraw(); });
+    const removed = [];
+    const redraw = () => renderPhotoGrid(grid, photos, id => { photos = photos.filter(x => x !== id); removed.push(id); redraw(); });
     redraw();
     const add = async cap => { const files = await pickPhotos(cap); if (!files.length) return; toast('جاري حفظ الصور…'); photos.push(...await addPhotos(files)); redraw(); };
     $('#cam', body).onclick = () => add(true);
@@ -1062,6 +1080,7 @@ function editFeature(geometry, kind, existing) {
       const vals = readForm(body, kind);
       if (!vals.category) { toast('اختار التصنيف'); return; }
       const props = { ...p, ...vals, kind, photos, id: p.id || uid('F'), created: p.created || nowIso(), observer: p.observer || S.settings.observer, editedBy: S.settings.observer };
+      if (removed.length) props.removedPhotos = [...new Set([...(p.removedPhotos || []), ...removed])];
       const f = { type: 'Feature', properties: props, geometry: existing ? existing.geometry : geometry };
       await putFeature(f); saved = true;
       renderSurvey(); closeSheet(); toast('انحفظ ✓');
@@ -1102,7 +1121,7 @@ async function openFeature(id) {
     $('#del', body).onclick = async () => {
       if (!confirm(`حذف «${p.name || label}» نهائياً؟`)) return;
       S.features.delete(id); await DB.del('features', id);
-      await DB.put('meta', { id: 'del:' + id, updated: nowIso() }); cloudKick();     // tell teammates' phones too
+      await DB.put('meta', { id: 'del:' + id, updated: nowIso() }); await markPending(id, 'deleted'); cloudKick();     // tell teammates' phones too
       for (const ph of p.photos || []) await DB.del('photos', ph);
       renderSurvey(); closeSheet(); toast('انحذف');
     };
@@ -1114,6 +1133,7 @@ async function openFeature(id) {
     const sh = $('#shape', body);
     if (sh) sh.onclick = () => { closeSheet(); editShape(id); };
   });
+  VIEW = { open: () => openFeature(id) };
 }
 
 function editShape(id) {
@@ -1163,7 +1183,7 @@ function ensureVisible(latlng) {
 }
 // the knowledge-base place whose name matches this building (names can be joined with " / ")
 const placeOf = base => { const n = base.properties.name; return n && (S.places || []).find(p => n.split(' / ').includes(p.name)); };
-function openBuilding(id) {
+function openBuilding(id, refresh) {
   const base = S.geoIndex.get(id); if (!base) return;
   const rec = S.heritage.get(id) || { id, photos: [] };
   const f = buildingFeature(id), c = featureCenter(f), her = isHeritageId(id);
@@ -1205,7 +1225,8 @@ function openBuilding(id) {
     const bf = $('#bField', body); if (bf) bf.onclick = () => { setAppMode('field'); flyToBuilding(hpId); openHeritagePoint(hpId); };
     return () => select(null);
   });
-  ensureVisible(labelPoint(f));
+  VIEW = { open: () => openBuilding(id, true) };
+  if (!refresh) ensureVisible(labelPoint(f));
 }
 
 function editBuilding(id) {
@@ -1220,7 +1241,8 @@ function editBuilding(id) {
     const sw = $('.switch', body);
     sw.onclick = () => { rec.visited = !rec.visited; sw.classList.toggle('on', rec.visited); };
     const grid = $('#fph', body);
-    const redraw = () => renderPhotoGrid(grid, photos, pid => { photos = photos.filter(x => x !== pid); redraw(); });
+    const removed = [];
+    const redraw = () => renderPhotoGrid(grid, photos, pid => { photos = photos.filter(x => x !== pid); removed.push(pid); redraw(); });
     redraw();
     const add = async cap => { const files = await pickPhotos(cap); if (!files.length) return; toast('جاري حفظ الصور…'); photos.push(...await addPhotos(files)); if (!rec.visited) { rec.visited = true; sw.classList.add('on'); } redraw(); };
     $('#cam', body).onclick = () => add(true);
@@ -1230,6 +1252,7 @@ function editBuilding(id) {
       const v = readForm(body, 'point'); delete v.category;
       const was = S.heritage.get(id)?.visited;
       Object.assign(rec, v, { photos });
+      if (removed.length) rec.removedPhotos = [...new Set([...(rec.removedPhotos || []), ...removed])];
       if (!rec.visited && isDocumented(rec)) rec.visited = true;
       if (rec.visited && !was) { rec.visitedAt = nowIso(); rec.visitedBy = S.settings.observer; }
       await putHeritage(rec); refreshBuilding(id); toast('انحفظ ✓'); openRecord(id);
@@ -1451,6 +1474,7 @@ function openHeritagePoint(id) {
     $('#hDraw', body).onclick = () => { closeSheet(); if (bnd) editShape(bnd.properties.id); else drawHeritageBoundary(id); };
     $('#hAna', body).onclick = () => { closeSheet(); setAppMode('analysis'); const b = p.members.map(m => buildingFeature(m)).filter(Boolean); if (b.length) map.flyToBounds(L.geoJSON({ type: 'FeatureCollection', features: b }).getBounds(), { maxZoom: 19, padding: [60, 60] }); };
   });
+  VIEW = { open: () => openHeritagePoint(id) };
 }
 
 function drawHeritageBoundary(id) {
@@ -1556,7 +1580,7 @@ function teamDisconnect() {
 }
 
 // ---- backup channel: the team's own Apps Script. Public brokers are free and can go down; this one is
-// Google's. Every ~10 s (25 s while a broker is up) each phone posts its latest sealed position and gets
+// Google's. Every ~10 s (15 s while a broker is up) each phone posts its latest sealed position and gets
 // everyone else's back. Same end-to-end encryption — the script only stores ciphertext, for ≤ 6 h.
 function googleLocStart() {
   clearTimeout(TEAM.g.timer);
@@ -1566,7 +1590,7 @@ async function googleLoc() {
   clearTimeout(TEAM.g.timer);
   const ts = teamSettings();
   if (!ts.code || !TEAM.topic || !cloudOn()) return;
-  const next = () => { TEAM.g.timer = setTimeout(googleLoc, document.hidden ? 30000 : TEAM.up.size ? 25000 : 10000); };
+  const next = () => { TEAM.g.timer = setTimeout(googleLoc, document.hidden ? 30000 : TEAM.up.size ? 15000 : 10000); };
   if (TEAM.g.busy || !navigator.onLine) return next();
   TEAM.g.busy = true;
   try {
@@ -1574,6 +1598,7 @@ async function googleLoc() {
     if (ts.sharing && TEAM.lastMsg) { body.msg = TEAM.lastMsg; TEAM.g.sent = Date.now(); }
     const j = await cloudCall(body, 20000);
     TEAM.g.ok = Date.now(); TEAM.g.fail = 0;
+    if (j.rev && j.rev !== CLOUD.rev) { const first = !CLOUD.rev; CLOUD.rev = j.rev; if (!first) cloudKick(300); }   // something changed in the cloud
     for (const l of j.locs || []) if (l.id !== deviceId) await onTeamMessage(`${TEAM.topic}/${l.id}`, l.m);
   } catch { TEAM.g.fail++; }
   finally { TEAM.g.busy = false; updateTeamBadge(); next(); }
@@ -1619,6 +1644,10 @@ async function teamConnect() {
 async function onTeamMessage(topic, payload) {
   const id = topic.split('/').pop();
   if (id === deviceId) return;
+  if (id === 'sync') {                                   // a teammate just uploaded something: fetch it now
+    try { const m = await unseal(payload.toString()); if (m.d !== deviceId) cloudKick(800); } catch {}
+    return;
+  }
   const s = payload.toString();
   if (!s) { TEAM.members.delete(id); renderTeam(); return; }                 // member stopped sharing
   let m; try { m = await unseal(s); } catch { return; }                       // not our team / tampered
@@ -1650,6 +1679,11 @@ async function teamPublish(force) {
   TEAM.lastMsg = msg;
   for (const c of TEAM.clients) if (c.connected) c.publish(`${TEAM.topic}/${deviceId}`, msg, { qos: 0, retain: true });
   if (!TEAM.up.size && now - TEAM.g.sent > 8000) googleLoc();   // no broker: don't wait for the next Google round
+}
+async function teamSignal() {
+  if (!TEAM.key || !TEAM.topic) return;
+  const msg = await seal({ sync: 1, d: deviceId, t: Date.now() });
+  for (const c of TEAM.clients) if (c.connected) c.publish(`${TEAM.topic}/sync`, msg, { qos: 0, retain: false });
 }
 async function teamStopSharing() {
   // clear our retained position so nobody sees a stale dot, then reconnect without a last will
@@ -1854,7 +1888,7 @@ async function teamFromLink() {
 // ---------------------------------------------------------------- team cloud: Google Drive via the user's Apps Script
 // Photos are uploaded once (sequentially, resumable), records are pushed when they change and pulled
 // from teammates. Remote photos are fetched on demand through the script and kept on the device.
-const CLOUD = { busy: false, timer: null, debounce: null, state: '', err: '', up: 0, upTotal: 0, lastOk: 0, pendPhotos: 0, pendRecs: 0 };
+const CLOUD = { busy: false, again: false, timer: null, debounce: null, state: '', err: '', up: 0, upTotal: 0, lastOk: 0, pendPhotos: 0, pendRecs: 0, rev: '' };
 // the team's Apps Script (cloud/Code.gs, open access): every visitor syncs with it automatically
 const TEAM_CLOUD_URL = 'https://script.google.com/macros/s/AKfycbzabFq7IVXtCGArW3T26G8PnlX5bmAh7XYpk89QOR5iO_bs-wsRCfCAgQZvgE8p8a-0gA/exec';
 const cloudCfg = () => {
@@ -1913,32 +1947,55 @@ function photoOwners() {
 }
 
 async function cloudSync() {
-  if (!cloudOn() || CLOUD.busy) return;
+  if (!cloudOn()) return;
+  if (CLOUD.busy) { CLOUD.again = true; return; }          // run once more right after this one
   if (!navigator.onLine) return setCloudState('offline');
-  CLOUD.busy = true; setCloudState('sync');
+  CLOUD.busy = true; CLOUD.again = false; setCloudState('sync');
   const c = cloudCfg();
   try {
-    // 1) push changed records (features, building records, deletions)
-    const recs = [];
-    for (const f of S.features.values()) if ((f.properties.updated || '') > (c.lastPush || '')) recs.push({ id: f.properties.id, store: 'features', updated: f.properties.updated, data: f });
-    for (const r of S.heritage.values()) if ((r.updated || '') > (c.lastPush || '')) recs.push({ id: r.id, store: 'heritage', updated: r.updated, data: r });
-    for (const d of await DB.all('meta')) if (d.id.startsWith('del:') && (d.updated || '') > (c.lastPush || '')) recs.push({ id: d.id.slice(4), store: 'deleted', updated: d.updated, data: { id: d.id.slice(4) } });
-    CLOUD.pendRecs = recs.length;
-    for (let i = 0; i < recs.length; i += 40) await cloudCall({ action: 'putRecords', records: recs.slice(i, i + 40) });
-    CLOUD.pendRecs = 0;
-    if (recs.length) { c.lastPush = recs.reduce((a, r) => (r.updated > a ? r.updated : a), c.lastPush || ''); await saveSettings(); }
-
-    // 2a) thumbnails first — a few KB each, so teammates see every photo within seconds
+    // 0) the team cloud was reset for a new survey? then this phone drops its data from before the reset
+    //    (checked on the first sync after opening the app, then every 10 minutes)
+    if (Date.now() - (CLOUD.epochAt || 0) > 600000) { const ep = await cloudCall({ action: 'epoch' }, 20000); await applyEpoch(ep.epoch); CLOUD.epochAt = Date.now(); }
+    // 1) thumbnails first — a few KB each — so the record and its photos reach teammates together
     const owners = photoOwners();
     const local = (await DB.all('photos')).filter(p => p.blob && !p.remote);
     const meta = p => ({ created: p.created, observer: p.observer || S.settings.observer, lat: p.lat, lng: p.lng, name: p.name });
+    let thumbsSent = 0;
     for (const p of local.filter(p => !p.thumbSent && !p.cloud && p.thumb)) {
       try {
         await cloudCall({ action: 'putThumb', id: p.id, thumb: await blobToB64(p.thumb), ownerId: owners.get(p.id)?.id || '', ownerName: owners.get(p.id)?.name || '', meta: meta(p) }, 30000);
-        p.thumbSent = true; await DB.put('photos', p);
+        p.thumbSent = true; await DB.put('photos', p); thumbsSent++;
       } catch (e) { if (!navigator.onLine) throw e; }
     }
-    // 2b) then the full photos, one at a time; one failing photo never blocks the others
+    // 2) push what this phone changed (features, building records, deletions)
+    if (!(await pendingLoad())) {             // first run of this version: everything changed since the last push
+      PENDING.ids = {};
+      for (const f of S.features.values()) if ((f.properties.updated || '') > (c.lastPush || '')) PENDING.ids[f.properties.id] = 'features';
+      for (const r of S.heritage.values()) if ((r.updated || '') > (c.lastPush || '')) PENDING.ids[r.id] = 'heritage';
+      for (const d of await DB.all('meta')) if (d.id.startsWith('del:') && (d.updated || '') > (c.lastPush || '')) PENDING.ids[d.id.slice(4)] = 'deleted';
+      await pendingSave();
+    }
+    const recs = [];
+    for (const [id, store] of Object.entries(PENDING.ids)) {
+      if (store === 'features' && S.features.has(id)) { const f = S.features.get(id); recs.push({ id, store, updated: f.properties.updated, data: f }); }
+      else if (store === 'heritage' && S.heritage.has(id)) { const r = S.heritage.get(id); recs.push({ id, store, updated: r.updated, data: r }); }
+      else if (store === 'deleted') recs.push({ id, store, updated: (await DB.get('meta', 'del:' + id))?.updated || nowIso(), data: { id } });
+      else delete PENDING.ids[id];
+    }
+    CLOUD.pendRecs = recs.length;
+    for (let i = 0; i < recs.length; i += 40) {
+      const batch = recs.slice(i, i + 40);
+      await cloudCall({ action: 'putRecords', records: batch });
+      // done — unless it was edited again while uploading
+      for (const r of batch) {
+        const cur = r.store === 'features' ? S.features.get(r.id)?.properties.updated : r.store === 'heritage' ? S.heritage.get(r.id)?.updated : r.updated;
+        if (cur === r.updated && PENDING.ids[r.id] === r.store) delete PENDING.ids[r.id];
+      }
+      await pendingSave();
+    }
+    CLOUD.pendRecs = Object.keys(PENDING.ids).length;
+    if (recs.length || thumbsSent) teamSignal();          // teammates fetch it right away instead of in 2 minutes
+    // 3) then the full photos, one at a time; one failing photo never blocks the others
     const pending = local.filter(p => !p.cloud && (p.cloudErrs || 0) < 5);
     CLOUD.upTotal = pending.length; CLOUD.up = 0;
     let failed = 0;
@@ -1963,7 +2020,7 @@ async function cloudSync() {
     CLOUD.upTotal = 0;
     CLOUD.pendPhotos = local.filter(p => !p.cloud).length;
 
-    // 3) pull teammates' changes (2-minute overlap covers writes that raced the previous pull)
+    // 4) pull teammates' changes (2-minute overlap covers writes that raced the previous pull)
     const since = c.lastPull ? new Date(new Date(c.lastPull).getTime() - 120000).toISOString() : '';
     const j = await cloudCall({ action: 'pull', since });
     const feats = j.records.filter(r => r.store === 'features').map(r => r.data);
@@ -1986,11 +2043,38 @@ async function cloudSync() {
     c.lastPull = j.now; await saveSettings();
     if (changed || newPhotos) { for (const k of [...S.urls.keys()]) if (!S.urls.get(k)) S.urls.delete(k); renderSurvey(); renderHeritagePoints(); }
     if (changed) renderHeritage();
+    if (changed || newPhotos) refreshView();
     CLOUD.lastOk = Date.now();
     setCloudState(failed ? 'error' : 'idle', failed ? `${failed} صورة ما انرفعت — راح يعيد المحاولة` : '');
   } catch (e) {
     setCloudState(navigator.onLine ? 'error' : 'offline', e.name === 'AbortError' ? 'الخادم بطيء' : e.message);
-  } finally { CLOUD.busy = false; }
+  } finally { CLOUD.busy = false; if (CLOUD.again) cloudKick(500); }
+}
+// the team cloud was reset (cloud/Code.gs resetForNewSurvey): drop this phone's data from before the reset.
+// Anything made after the reset stays and is uploaded.
+async function applyEpoch(epoch) {
+  const c = cloudCfg();
+  if (!epoch || c.epoch === epoch) return;
+  const synced = c.epoch || c.lastPull;               // a phone that never synced has nothing from the old survey
+  c.epoch = epoch;
+  if (!synced) return saveSettings();
+  const at = new Date(Number(String(epoch).slice(1)) || 0).toISOString();
+  const pend = await pendingLoad();
+  // keep only this phone's own work from after the reset that is still waiting to upload
+  const mine = (id, updated) => (updated || '') >= at && (pend ? !!pend[id] : (updated || '') > (c.lastPush || ''));
+  let n = 0;
+  for (const [id, f] of [...S.features]) if (!mine(id, f.properties.updated)) { S.features.delete(id); await DB.del('features', id); n++; }
+  for (const [id, r] of [...S.heritage]) if (!mine(id, r.updated)) { S.heritage.delete(id); await DB.del('heritage', id); n++; }
+  for (const ph of await DB.all('photos')) if (ph.remote || (ph.created || '') < at) { await DB.del('photos', ph.id); n++; }
+  PENDING.ids = Object.fromEntries(Object.entries(pend || {}).filter(([id]) => S.features.has(id) || S.heritage.has(id)));
+  await pendingSave();
+  for (const d of await DB.all('meta')) if (d.id.startsWith('del:') && (d.updated || '') < at) await DB.del('meta', d.id);
+  for (const u of S.urls.values()) if (u) URL.revokeObjectURL(u);
+  S.urls.clear();
+  Object.assign(c, { lastPull: '', lastPush: '' });
+  await saveSettings();
+  closeSheet(); renderSurvey(); renderHeritage(); renderHeritagePoints();
+  if (n) toast('بدينا مسح جديد — انمسحت بيانات التجربة القديمة من هذا التلفون', 6000);
 }
 // run soon after a local change, and every 2 minutes in the background
 function cloudKick(delay = 4000) { if (!cloudOn()) return; clearTimeout(CLOUD.debounce); CLOUD.debounce = setTimeout(cloudSync, delay); }
@@ -2473,8 +2557,8 @@ function importFile() {
             const pm = meta.find(x => x && x.id === m[1]) || {};
             await DB.put('photos', { id: m[1], blob: new Blob([blob], { type: m[2] === 'webp' ? 'image/webp' : 'image/jpeg' }), thumb, created: pm.created, lat: pm.lat, lng: pm.lng, observer: pm.observer }); nP++;
           }
-          if (zip.file('survey.geojson')) nF += await mergeFeatures(JSON.parse(await zip.file('survey.geojson').async('string')).features);
-          if (zip.file('heritage_records.json')) nH += await mergeHeritage(JSON.parse(await zip.file('heritage_records.json').async('string')));
+          if (zip.file('survey.geojson')) nF += await mergeFeatures(JSON.parse(await zip.file('survey.geojson').async('string')).features, true);
+          if (zip.file('heritage_records.json')) nH += await mergeHeritage(JSON.parse(await zip.file('heritage_records.json').async('string')), true);
         } else {
           const gj = JSON.parse(await file.text());
           nF += await mergeFeatures((gj.features || []).filter(f => !['heritage', 'building'].includes(f.properties?.kind)).map(f => {
@@ -2490,28 +2574,41 @@ function importFile() {
   };
   inp.click();
 }
-async function mergeFeatures(list) {
+// two people adding photos to the same record at once: keep both sets (except photos someone removed on purpose)
+function unionPhotos(a, b) {
+  const gone = new Set([...(a.removedPhotos || []), ...(b.removedPhotos || [])]);
+  const add = (b.photos || []).filter(x => !(a.photos || []).includes(x) && !gone.has(x));
+  if (gone.size) a.removedPhotos = [...gone];
+  if (!add.length) return false;
+  a.photos = [...(a.photos || []).filter(x => !gone.has(x)), ...add];
+  return true;
+}
+async function mergeFeatures(list, mine) {
   let n = 0;
   for (const f of list) {
     const id = f.properties?.id; if (!id || !f.geometry) continue;
     const cur = S.features.get(id);
-    if (cur && (cur.properties.updated || '') >= (f.properties.updated || '')) continue;
+    if (cur && (cur.properties.updated || '') >= (f.properties.updated || '')) {
+      if (unionPhotos(cur.properties, f.properties)) { await DB.put('features', { id, feature: cur }); n++; }
+      continue;
+    }
+    if (cur) unionPhotos(f.properties, cur.properties);
     S.features.set(id, f); await DB.put('features', { id, feature: f }); n++;
+    if (mine) await markPending(id, 'features');
   }
   return n;
 }
-async function mergeHeritage(list) {
+async function mergeHeritage(list, mine) {
   let n = 0;
   for (const r of list) {
     const cur = S.heritage.get(r.id);
     if (cur && (cur.updated || '') >= (r.updated || '')) {
-      // still union photos so nobody's pictures get lost
-      const extra = (r.photos || []).filter(p => !(cur.photos || []).includes(p));
-      if (extra.length) { cur.photos = [...(cur.photos || []), ...extra]; await DB.put('heritage', cur); n++; }
+      if (unionPhotos(cur, r)) { await DB.put('heritage', cur); n++; }
       continue;
     }
-    if (cur) r.photos = [...new Set([...(cur.photos || []), ...(r.photos || [])])];
+    if (cur) unionPhotos(r, cur);
     S.heritage.set(r.id, r); await DB.put('heritage', r); n++;
+    if (mine) await markPending(r.id, 'heritage');
   }
   return n;
 }
