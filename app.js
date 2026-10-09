@@ -3,7 +3,7 @@
 'use strict';
 
 // ---------------------------------------------------------------- constants
-const DATA_VERSION = '28';    // bump when files in data/ change (also in sw.js)
+const DATA_VERSION = '29';    // bump when files in data/ change (also in sw.js)
 const SITE_CENTER = [33.3387, 44.3935];
 const SITE_ZOOM = 17;
 const BAGHDAD_VIEWBOX = '44.20,33.45,44.55,33.20';
@@ -1604,7 +1604,13 @@ async function onTeamMessage(topic, payload) {
   const cur = TEAM.members.get(id);
   // last will ("connection dropped"): its timestamp is from when that phone connected, so it is older than
   // the positions sent since — apply it to the last known position instead of comparing times
-  if (m.off) { if (cur && !cur.off) { cur.off = true; cur.offAt = Date.now(); renderTeam(); } return; }
+  if (m.off) {
+    if (cur && !cur.off) {
+      const t0 = cur.t;
+      setTimeout(() => { const c = TEAM.members.get(id); if (c && c.t === t0 && !c.off) { c.off = true; c.offAt = Date.now(); renderTeam(); } }, 45000);
+    }
+    return;
+  }
   if (cur && cur.t >= m.t) return;                                            // same message via another channel
   TEAM.members.set(id, { ...m, id, off: false });
   renderTeam();
@@ -1613,6 +1619,7 @@ async function teamPublish(force) {
   const ts = teamSettings();
   if (!ts.sharing || !S.me || !TEAM.key) return;
   const now = Date.now();
+  if (now - S.me.t > 90000) return;                                          // no precise fix lately: let it go stale honestly
   const moved = TEAM.lastPos ? map.distance(TEAM.lastPos, [S.me.lat, S.me.lng]) : Infinity;
   if (!force && (now - TEAM.lastSent < 5000 || (moved < 8 && now - TEAM.lastSent < 30000))) return;
   TEAM.lastSent = now; TEAM.lastPos = [S.me.lat, S.me.lng];
@@ -2039,7 +2046,7 @@ function startCrosshair() {
   ]);
 }
 function addAtGps() {
-  if (!S.me) { toast('ننتظر إشارة الـ GPS…'); startGps(); waitFix(fix => editFeature({ type: 'Point', coordinates: [fix.lng, fix.lat] }, 'point')); return; }
+  if (!S.me) { toast('ننتظر GPS دقيق (±30 م أو أحسن)…'); startGps(); waitFix(fix => editFeature({ type: 'Point', coordinates: [fix.lng, fix.lat] }, 'point')); return; }
   if (S.me.acc > 30) toast(`دقة الـ GPS ضعيفة (±${Math.round(S.me.acc)} م) — تأكد من المكان`);
   editFeature({ type: 'Point', coordinates: [S.me.lng, S.me.lat] }, 'point');
 }
@@ -2114,45 +2121,116 @@ function startMeasure() {
 $('#btnMeasure').onclick = startMeasure;
 
 // ---------------------------------------------------------------- GPS
-let watchId = null, follow = false, meMarker = null, accCircle = null, fixWaiters = [], wakeLock = null;
+// Only fixes within GPS_MAX_ACC metres are used: coarse Wi-Fi / cell-tower fixes (often 100 m+) never move the
+// dot, never tag a photo and never reach the team. Good fixes go through a small Kalman filter (walking speed),
+// and a sudden jump that no accuracy circle explains (multipath in narrow alleys) is held back until the next
+// fixes confirm it.
+const GPS_MAX_ACC = 30, GPS_Q = 4;          // metres; m/s of expected movement
+let watchId = null, follow = false, meMarker = null, accCircle = null, fixWaiters = [], wakeLock = null, compassOn = false;
+const KF = { lat: 0, lng: 0, v: -1, t: 0, sus: [], lastRaw: 0, weak: 0 };
 function waitFix(fn) { fixWaiters.push(fn); }
+function watchGps() {
+  if (watchId != null) navigator.geolocation.clearWatch(watchId);
+  watchId = navigator.geolocation.watchPosition(onFix, onGpsErr, { enableHighAccuracy: true, maximumAge: 0, timeout: 30000 });
+}
 function startGps() {
   if (!('geolocation' in navigator)) return toast('الجهاز ما يدعم تحديد الموقع');
   if (watchId != null) return;
-  watchId = navigator.geolocation.watchPosition(onFix, err => {
-    toast(err.code === 1 ? 'لازم تسمح للموقع بالوصول للـ GPS من إعدادات المتصفح' : 'ما كدرنا نحدد موقعك — جرّب بمكان مفتوح');
-    if (err.code === 1) stopGps();
-  }, { enableHighAccuracy: true, maximumAge: 2000, timeout: 20000 });
+  KF.lastRaw = Date.now();
+  watchGps();
+  if (!S.settings.gpsOn) { S.settings.gpsOn = true; saveSettings(); }      // comes back on after an update / reload
   $('#btnGps').classList.add('on');
-  startCompass();
+  gpsChip();
+  if (!compassOn) { compassOn = true; startCompass(); }
 }
 function stopGps() {
   if (watchId != null) navigator.geolocation.clearWatch(watchId);
   watchId = null; follow = false; L_.me.clearLayers(); meMarker = accCircle = null; S.me = null;
+  Object.assign(KF, { v: -1, sus: [], weak: 0 });
+  if (S.settings.gpsOn) { S.settings.gpsOn = false; saveSettings(); }
   $('#btnGps').classList.remove('on', 'follow'); $('#gpsChip').hidden = true;
 }
+function onGpsErr(err) {
+  if (err.code === 1) { toast('لازم تسمح للموقع بالوصول للـ GPS من إعدادات المتصفح', 5000); stopGps(); return; }
+  gpsChip();                                  // timeout / no signal: keep watching, the watchdog restarts it
+}
+// some phones silently stop a watch after the app was in the background — restart it when it goes quiet
+setInterval(() => { if (watchId != null && !document.hidden && Date.now() - KF.lastRaw > 25000) { KF.lastRaw = Date.now(); watchGps(); } gpsChip(); }, 10000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden && watchId != null) { KF.lastRaw = Date.now(); watchGps(); } });
+
 function onFix(pos) {
   const { latitude: lat, longitude: lng, accuracy: acc } = pos.coords;
+  const t = pos.timestamp || Date.now();
+  KF.lastRaw = Date.now();
+  if (!(acc <= GPS_MAX_ACC)) { KF.weak = Math.round(acc); gpsChip(); return; }     // too coarse: keep the last good position
+  KF.weak = 0;
+  if (KF.v < 0 || t - KF.t > 120000) Object.assign(KF, { lat, lng, v: acc * acc, t, sus: [] });
+  else {
+    const dt = Math.max(0, (t - KF.t) / 1000), d = map.distance([KF.lat, KF.lng], [lat, lng]);
+    if (d > Math.sqrt(KF.v) + acc + 10 && d / Math.max(dt, 1) > 7) {
+      // farther than both circles allow and faster than running: believe it only when 3 fixes agree
+      KF.sus.push({ lat, lng, acc });
+      const last = KF.sus.slice(-3);
+      if (last.length < 3 || !last.every(q => map.distance([q.lat, q.lng], [lat, lng]) <= q.acc + acc)) { if (KF.sus.length > 6) KF.sus.shift(); gpsChip(); return; }
+      Object.assign(KF, { lat, lng, v: acc * acc, t, sus: [] });
+    } else {
+      KF.sus = [];
+      KF.v += dt * GPS_Q * GPS_Q;
+      const k = KF.v / (KF.v + acc * acc);
+      KF.lat += k * (lat - KF.lat); KF.lng += k * (lng - KF.lng); KF.v *= 1 - k; KF.t = t;
+    }
+  }
+  placeMe(KF.lat, KF.lng, acc, t);
+}
+function placeMe(lat, lng, acc, t) {
   const first = !S.me;
-  S.me = { ...(S.me || {}), lat, lng, acc, t: pos.timestamp };
+  S.me = { ...(S.me || {}), lat, lng, acc, t };
   if (!meMarker) {
     meMarker = L.marker([lat, lng], { icon: L.divIcon({ className: '', html: '<div class="me"><span class="hd"></span></div>', iconSize: [20, 20], iconAnchor: [10, 10] }), zIndexOffset: 1000, interactive: false }).addTo(L_.me);
     accCircle = L.circle([lat, lng], { radius: acc, color: '#1a73e8', weight: 1, fillOpacity: .08, interactive: false }).addTo(L_.me);
   } else { meMarker.setLatLng([lat, lng]); accCircle.setLatLng([lat, lng]).setRadius(acc); }
-  updateHeading();
-  const chip = $('#gpsChip'); chip.hidden = false;
-  chip.textContent = `دقة ±${Math.round(acc)} م${acc > 30 ? ' — ضعيفة' : ''}`;
+  updateHeading(); gpsChip();
   if (first) { follow = true; $('#btnGps').classList.add('follow'); map.flyTo([lat, lng], Math.max(map.getZoom(), 18)); }
   else if (follow) map.panTo([lat, lng], { animate: true });
   if (track) trackFix(lat, lng, acc);
   if (teamSettings().sharing) teamPublish();
   const w = fixWaiters; fixWaiters = []; w.forEach(fn => fn(S.me));
 }
-$('#btnGps').onclick = () => {
-  if (watchId == null) return startGps();
-  if (!follow) { follow = true; $('#btnGps').classList.add('follow'); if (S.me) map.flyTo([S.me.lat, S.me.lng], Math.max(map.getZoom(), 18)); return; }
-  stopGps(); toast('انطفى الـ GPS');
-};
+// the chip says plainly what the dot is: a fresh precise fix, an older precise one, or still waiting
+function gpsChip() {
+  const chip = $('#gpsChip'); if (!chip) return;
+  if (watchId == null) { chip.hidden = true; return; }
+  chip.hidden = false;
+  const age = S.me ? (Date.now() - S.me.t) / 1000 : Infinity, old = age > 20;
+  meMarker?.getElement()?.querySelector('.me')?.classList.toggle('old', old);
+  chip.classList.toggle('warn', !S.me || old);
+  chip.textContent = !S.me
+    ? (KF.weak ? `ننتظر GPS دقيق… الإشارة هسه ±${KF.weak} م` : 'ننتظر إشارة الـ GPS…')
+    : old ? `آخر موقع دقيق قبل ${age < 90 ? Math.round(age) + ' ث' : Math.round(age / 60) + ' د'}${KF.weak ? ` · الإشارة هسه ±${KF.weak} م` : ''}`
+    : `دقة ±${Math.round(S.me.acc)} م`;
+}
+$('#gpsChip').onclick = () => openSheet('دقة الموقع', `
+  <p style="margin-top:0">التطبيق ما يستخدم أي موقع دقته أسوأ من <b>±${GPS_MAX_ACC} م</b> — لا للنقطة الزرقاء، لا للصور، ولا للفريق.</p>
+  <p class="muted">إذا بقى «ننتظر GPS دقيق»، فالتلفون ديعطي موقع تقريبي من أبراج الاتصال بدل الـ GPS:</p>
+  <ul class="muted">
+    <li><b>آيفون:</b> الإعدادات › الخصوصية › خدمات الموقع › Safari (أو Chrome) › شغّل «الموقع الدقيق» واختار «أثناء الاستخدام».</li>
+    <li><b>أندرويد:</b> الإعدادات › الموقع › شغّل «دقة الموقع من Google»، وبإعدادات الموقع للمتصفح خلّيه «دقيق» مو «تقريبي».</li>
+    <li>اطلع لمكان مفتوح دقيقة وحدة حتى يلكف الأقمار — بالأزقة الضيكة والسقوف الإشارة تضعف.</li>
+  </ul>`);
+// tap: turn on / re-centre and follow. Long-press: turn off (so a tap never switches it off by accident)
+{
+  const b = $('#btnGps'); let pressT = null, long = false;
+  b.title = 'موقعي — ضغطة مطوّلة تطفيه';
+  b.addEventListener('pointerdown', () => { long = false; clearTimeout(pressT); pressT = setTimeout(() => { if (watchId != null) { long = true; stopGps(); toast('انطفى الـ GPS'); } }, 700); });
+  ['pointerup', 'pointerleave', 'pointercancel'].forEach(e => b.addEventListener(e, () => clearTimeout(pressT)));
+  b.addEventListener('contextmenu', e => e.preventDefault());
+  b.onclick = () => {
+    if (long) { long = false; return; }
+    if (watchId == null) return startGps();
+    follow = true; b.classList.add('follow');
+    if (S.me) map.flyTo([S.me.lat, S.me.lng], Math.max(map.getZoom(), 18)); else toast('ننتظر GPS دقيق…');
+  };
+}
 map.on('dragstart', () => { if (follow) { follow = false; $('#btnGps').classList.remove('follow'); } });
 
 function startCompass() {
@@ -2182,7 +2260,7 @@ async function startTrack() {
   if (S.me) trackFix(S.me.lat, S.me.lng, S.me.acc);
 }
 function trackFix(lat, lng, acc) {
-  if (acc > 35) { $('#trackInfo').textContent = `الإشارة ضعيفة ±${Math.round(acc)} م…`; return; }
+  if (acc > GPS_MAX_ACC) { $('#trackInfo').textContent = `الإشارة ضعيفة ±${Math.round(acc)} م…`; return; }
   const last = track.pts[track.pts.length - 1];
   if (last) { const d = map.distance(last, [lat, lng]); if (d < Math.max(3, acc / 3)) return; track.len += d; }
   track.pts.push([lat, lng]); track.line.addLatLng([lat, lng]);
@@ -2456,7 +2534,8 @@ $('#btnSite').onclick = () => map.flyTo(SITE_CENTER, SITE_ZOOM);
   renderHeritage(); renderStreets(); renderPlaces(); renderAxes(); renderHeritagePoints(); renderPlan(); renderSurvey();
   document.body.dataset.mode = S.settings.mode;
   L_.team.addTo(map);
-  if (teamSettings().code) { teamConnect(); if (teamSettings().sharing) startGps(); }
+  if (teamSettings().code) teamConnect();
+  if (teamSettings().sharing || S.settings.gpsOn) startGps();
   if (!S.settings.welcomed) setTimeout(openWelcome, 900);
   teamFromLink();
   await cloudFromLink();

@@ -332,3 +332,9 @@ details.howto code { background: var(--panel); padding: 0 4px; border-radius: 4p
 .thumb-pin.waiting { background: #3b3127 !important; display: grid; place-items: center; }
 .thumb-pin.waiting::before { content: "📷"; font-size: 15px; }
 .ph.waiting, .hero-ph.waiting { display: grid; place-items: center; color: var(--ink-2); font-size: 13px; text-align: center; padding: 8px; background: var(--panel-2); }
+
+/* GPS: last precise fix is getting old / waiting for a precise one */
+.me.old { background: #8a94a6; box-shadow: 0 0 0 6px rgba(138,148,166,.25), 0 1px 6px rgba(0,0,0,.4); }
+.me.old .hd { display: none !important; }
+.gps-chip { cursor: pointer; }
+.gps-chip.warn { background: #6b4a12; color: #ffe2a8; }
