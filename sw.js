@@ -4,7 +4,7 @@
 //  - versioned app files, data and pinned CDN libraries: precached, cache first (URLs change per version)
 //  - map tiles: cache-first, capped so the phone's storage doesn't fill up
 // Bump VERSION whenever app.js / app.css / index.html / data/* change (keep DATA_VERSION in app.js in sync).
-const VERSION = '30';
+const VERSION = '31';
 const SHELL = `shell-v${VERSION}`, TILES = 'tiles-v2', TILE_LIMIT = 4000;
 const TILE_HOSTS = ['server.arcgisonline.com', 'tile.openstreetmap.org', 'basemaps.cartocdn.com'];
 const DATA = ['heritage', 'buildings', 'streets', 'site', 'landmarks', 'context_buildings', 'cad_contours', 'places', 'heritage_points'].map(n => `data/${n}.json?v=${VERSION}`);
@@ -57,7 +57,8 @@ self.addEventListener('fetch', e => {
   // the page itself: network first (so a new version shows on the very next open), cache if offline/slow
   if (req.mode === 'navigate') {
     e.respondWith(caches.open(SHELL).then(async c => {
-      const net = fetch(req).then(r => { if (r.ok) c.put('index.html', r.clone()); return r; });
+      // no-cache: always ask the server (a cheap 304 when nothing changed) instead of the browser's 10-minute copy
+      const net = fetch(req.url, { cache: 'no-cache', credentials: 'same-origin' }).then(r => { if (r.ok) c.put('index.html', r.clone()); return r; });
       const slow = new Promise(res => setTimeout(res, 3500, null));
       try {
         const r = await Promise.race([net, slow]);
