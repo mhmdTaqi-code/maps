@@ -3,7 +3,7 @@
 'use strict';
 
 // ---------------------------------------------------------------- constants
-const DATA_VERSION = '35';    // bump when files in data/ change (also in sw.js)
+const DATA_VERSION = '36';    // bump when files in data/ change (also in sw.js)
 const SITE_CENTER = [33.3387, 44.3935];
 const SITE_ZOOM = 17;
 const BAGHDAD_VIEWBOX = '44.20,33.45,44.55,33.20';
@@ -1926,7 +1926,7 @@ async function teamFromLink() {
 // ---------------------------------------------------------------- team cloud: Google Drive via the user's Apps Script
 // Photos are uploaded once (sequentially, resumable), records are pushed when they change and pulled
 // from teammates. Remote photos are fetched on demand through the script and kept on the device.
-const CLOUD = { busy: false, again: false, timer: null, debounce: null, state: '', err: '', up: 0, upTotal: 0, lastOk: 0, pendPhotos: 0, pendRecs: 0, rev: '' };
+const CLOUD = { busy: false, again: false, wants: 0, exchangeEvery: 60000, timer: null, debounce: null, state: '', err: '', pullErr: '', up: 0, upTotal: 0, lastOk: 0, pendPhotos: 0, pendRecs: 0, rev: '' };
 // the team's Apps Script (cloud/Code.gs, open access): every visitor syncs with it automatically
 const TEAM_CLOUD_URL = 'https://script.google.com/macros/s/AKfycbzabFq7IVXtCGArW3T26G8PnlX5bmAh7XYpk89QOR5iO_bs-wsRCfCAgQZvgE8p8a-0gA/exec';
 const cloudCfg = () => {
@@ -1969,7 +1969,7 @@ function cloudStatusHtml() {
   const ago = CLOUD.lastOk ? agoTxt(CLOUD.lastOk) : '—';
   const up = CLOUD.upTotal ? ` · رفع الصور ${CLOUD.up}/${CLOUD.upTotal}` : '';
   const pend = CLOUD.pendPhotos || CLOUD.pendRecs ? `<br>⚠ بعده على هذا التلفون بس: ${[CLOUD.pendRecs && CLOUD.pendRecs + ' سجل', CLOUD.pendPhotos && CLOUD.pendPhotos + ' صورة'].filter(Boolean).join(' و ')} — خلّي التطبيق مفتوح على النت حتى يرتفع` : (CLOUD.lastOk ? '<br>✓ كل شي بالـ Drive' : '');
-  return ({ idle: `✓ متزامن · آخر مزامنة ${ago}`, sync: `⏳ جاري المزامنة${up}`, offline: '📴 بدون نت — راح تتزامن لمن يرجع', error: `⚠ ${esc(CLOUD.err)} — راح يعيد المحاولة` }[CLOUD.state] || `آخر مزامنة ${ago}`) + pend;
+  return ({ idle: CLOUD.pendPhotos || CLOUD.pendRecs ? `آخر مزامنة ${ago}` : `✓ متزامن · آخر مزامنة ${ago}`, sync: `⏳ جاري المزامنة${up}`, offline: '📴 بدون نت — راح تتزامن لمن يرجع', error: `⚠ ${esc(CLOUD.err)} — راح يعيد المحاولة` }[CLOUD.state] || `آخر مزامنة ${ago}`) + pend;
 }
 function updateCloudBadge() {
   const b = document.querySelector('.dock [data-panel="more"]'); if (!b) return;
@@ -1984,9 +1984,43 @@ function photoOwners() {
   return m;
 }
 
+// a photo taken / imported on this phone that is not in the Drive yet
+const unsentPhoto = p => !!(p && p.blob && !p.remote && !p.cloud && !DELPH.has(p.id));
+// a photo whose upload failed waits 2, 4, 8 … up to 60 minutes before the next try — but is never given up on
+const photoDue = (p, now = Date.now()) => !p.cloudErrs || now - (p.cloudErrAt || 0) >= Math.min(60, 2 ** p.cloudErrs) * 60000;
+const photoMeta = p => ({ created: p.created, observer: p.observer || S.settings.observer, lat: p.lat, lng: p.lng, name: p.name });
+
+// work saved before this phone ever synced with this cloud (an older app version without the cloud, a ZIP import,
+// a new team cloud) is queued once per cloud + survey epoch. Only this phone's own work: before its first pull
+// from this cloud everything on it is its own (plus its deletions); after that, the records holding photos taken
+// here. Deletion markers take priority over stale records, and the records go up with their
+// own `updated`, so a newer version in the cloud still wins and only gains the photos.
+async function cloudBackfill() {
+  const c = cloudCfg(), key = `${c.url}|${c.epoch || ''}`;
+  if (c.backfill === key) return 0;
+  await pendingLoad(); PENDING.ids ||= {};
+  const meta = await DB.all('meta');
+  const deleted = new Set(meta.filter(d => d.id.startsWith('del:')).map(d => d.id.slice(4)));
+  const own = new Set((await DB.all('photos')).filter(p => p.blob && !p.remote && !DELPH.has(p.id)).map(p => p.id));
+  const all = !c.lastPull, owns = list => (list || []).some(x => own.has(x));
+  let n = 0;
+  const add = (id, store) => { if (!PENDING.ids[id]) { PENDING.ids[id] = store; n++; } };
+  for (const f of S.features.values()) if (!deleted.has(f.properties.id) && (all || owns(f.properties.photos))) add(f.properties.id, 'features');
+  for (const r of S.heritage.values()) if (!deleted.has(r.id) && (all || owns(r.photos))) add(r.id, 'heritage');
+  for (const d of meta) {
+    const store = d.id.startsWith('del:') ? 'deleted' : d.id.startsWith('delph:') ? 'delphoto' : '';
+    if (!store) continue;
+    const id = d.id.slice(store === 'deleted' ? 4 : 6);
+    if (PENDING.ids[id] !== store) { PENDING.ids[id] = store; n++; }
+  }
+  await pendingSave();
+  c.backfill = key; await saveSettings();
+  return n;
+}
+
 async function cloudSync() {
   if (!cloudOn()) return;
-  if (CLOUD.busy) { CLOUD.again = true; return; }          // run once more right after this one
+  if (CLOUD.busy) { CLOUD.again = true; CLOUD.wants++; return; }   // run once more right after this one
   if (!navigator.onLine) return setCloudState('offline');
   CLOUD.busy = true; CLOUD.again = false; setCloudState('sync');
   const c = cloudCfg();
@@ -1994,18 +2028,6 @@ async function cloudSync() {
     // 0) the team cloud was reset for a new survey? then this phone drops its data from before the reset
     //    (checked on the first sync after opening the app, then every 10 minutes)
     if (Date.now() - (CLOUD.epochAt || 0) > 600000) { const ep = await cloudCall({ action: 'epoch' }, 20000); await applyEpoch(ep.epoch); CLOUD.epochAt = Date.now(); }
-    // 1) thumbnails first — a few KB each — so the record and its photos reach teammates together
-    const owners = photoOwners();
-    const local = (await DB.all('photos')).filter(p => p.blob && !p.remote);
-    const meta = p => ({ created: p.created, observer: p.observer || S.settings.observer, lat: p.lat, lng: p.lng, name: p.name });
-    let thumbsSent = 0;
-    for (const p of local.filter(p => !p.thumbSent && !p.cloud && p.thumb)) {
-      try {
-        await cloudCall({ action: 'putThumb', id: p.id, thumb: await blobToB64(p.thumb), ownerId: owners.get(p.id)?.id || '', ownerName: owners.get(p.id)?.name || '', meta: meta(p) }, 30000);
-        p.thumbSent = true; await DB.put('photos', p); thumbsSent++;
-      } catch (e) { if (!navigator.onLine) throw e; }
-    }
-    // 2) push what this phone changed (features, building records, deletions)
     if (!(await pendingLoad())) {             // first run of this version: everything changed since the last push
       PENDING.ids = {};
       for (const f of S.features.values()) if ((f.properties.updated || '') > (c.lastPush || '')) PENDING.ids[f.properties.id] = 'features';
@@ -2013,91 +2035,131 @@ async function cloudSync() {
       for (const d of await DB.all('meta')) if (d.id.startsWith('del:') && (d.updated || '') > (c.lastPush || '')) PENDING.ids[d.id.slice(4)] = 'deleted';
       await pendingSave();
     }
-    const gone = Object.keys(PENDING.ids).filter(id => PENDING.ids[id] === 'delphoto');
-    if (gone.length) {
-      await cloudCall({ action: 'delPhotos', ids: gone });
-      for (const id of gone) delete PENDING.ids[id];
-      await pendingSave();
-    }
-    const recs = [];
-    for (const [id, store] of Object.entries(PENDING.ids)) {
-      if (store === 'delphoto') continue;
-      if (store === 'features' && S.features.has(id)) { const f = S.features.get(id); recs.push({ id, store, updated: f.properties.updated, data: f }); }
-      else if (store === 'heritage' && S.heritage.has(id)) { const r = S.heritage.get(id); recs.push({ id, store, updated: r.updated, data: r }); }
-      else if (store === 'deleted') recs.push({ id, store, updated: (await DB.get('meta', 'del:' + id))?.updated || nowIso(), data: { id } });
-      else delete PENDING.ids[id];
-    }
-    CLOUD.pendRecs = recs.length;
-    for (let i = 0; i < recs.length; i += 40) {
-      const batch = recs.slice(i, i + 40);
-      await cloudCall({ action: 'putRecords', records: batch });
-      // done — unless it was edited again while uploading
-      for (const r of batch) {
-        const cur = r.store === 'features' ? S.features.get(r.id)?.properties.updated : r.store === 'heritage' ? S.heritage.get(r.id)?.updated : r.updated;
-        if (cur === r.updated && PENDING.ids[r.id] === r.store) delete PENDING.ids[r.id];
-      }
-      await pendingSave();
-    }
-    CLOUD.pendRecs = Object.keys(PENDING.ids).length;
-    if (recs.length || thumbsSent) teamSignal();          // teammates fetch it right away instead of in 2 minutes
-    // 3) then the full photos, one at a time; one failing photo never blocks the others
-    const pending = local.filter(p => !p.cloud && (p.cloudErrs || 0) < 5);
-    CLOUD.upTotal = pending.length; CLOUD.up = 0;
-    let failed = 0;
-    for (const p of pending) {
+    await cloudBackfill();
+    // 1) the small things — deletions, thumbnails, records, then teammates' changes — so everyone sees each
+    //    other's work within seconds, even while a long batch of originals is uploading
+    let wants = CLOUD.wants, thumbsFailed = await cloudExchange(c), exchangedAt = Date.now();
+    // 2) then the originals, one at a time; one failing photo never blocks the others. Every minute (or right away
+    //    when something new was saved) the small things run again in between.
+    const queue = (await DB.all('photos')).filter(p => unsentPhoto(p) && photoDue(p)).sort((a, b) => (a.cloudErrs || 0) - (b.cloudErrs || 0));
+    CLOUD.upTotal = queue.length; CLOUD.up = 0;
+    let uploaded = 0;
+    for (const { id } of queue) {
       if (!navigator.onLine) throw new Error('انقطع النت');
+      if (Date.now() - exchangedAt >= CLOUD.exchangeEvery || CLOUD.wants !== wants) { wants = CLOUD.wants; thumbsFailed = await cloudExchange(c); exchangedAt = Date.now(); }
+      const p = await DB.get('photos', id);           // fresh copy: a pull or a deletion may have changed it meanwhile
+      CLOUD.up++;
+      if (!unsentPhoto(p)) continue;
+      const owner = photoOwners().get(p.id);
       try {
         const big = p.blob.size > 1.5e6;
         const preview = big ? await compressImage(p.blob, 1600, .82).catch(() => null) : null;
         if (DELPH.has(p.id)) continue;
         const j = await cloudCall({ action: 'putPhoto', id: p.id, mime: p.blob.type || 'image/jpeg', data: await blobToB64(p.blob),
           preview: preview ? await blobToB64(preview) : undefined, thumb: p.thumb ? await blobToB64(p.thumb) : undefined,
-          ownerId: owners.get(p.id)?.id || '', ownerName: owners.get(p.id)?.name || '', meta: meta(p) }, 60000 + p.blob.size / 25);   // ≈ 25 KB/s worst case
+          ownerId: owner?.id || '', ownerName: owner?.name || '', meta: photoMeta(p) }, 60000 + p.blob.size / 25);   // ≈ 25 KB/s worst case
         if (j.deleted) { await forgetPhoto(p.id); continue; }
-        p.cloud = j.fileId;
+        p.cloud = j.fileId; delete p.cloudErrs; delete p.cloudErrAt; uploaded++;
         // the original stays on the phone too; only when the browser's storage runs low is it swapped for the 1600 px copy
         if (preview && await storageTight()) { p.blob = preview; p.slim = true; }
       } catch (e) {
         if (!navigator.onLine) throw e;
-        p.cloudErrs = (p.cloudErrs || 0) + 1; failed++;
+        p.cloudErrs = (p.cloudErrs || 0) + 1; p.cloudErrAt = Date.now();
       }
+      if (DELPH.has(p.id)) continue;                  // deleted while it was uploading: don't bring it back
       await DB.put('photos', p);
-      CLOUD.up++; setCloudState('sync');
+      setCloudState('sync');
     }
     CLOUD.upTotal = 0;
-    CLOUD.pendPhotos = local.filter(p => !p.cloud).length;
-
-    // 4) pull teammates' changes (2-minute overlap covers writes that raced the previous pull)
-    const since = c.lastPull ? new Date(new Date(c.lastPull).getTime() - 120000).toISOString() : '';
-    const j = await cloudCall({ action: 'pull', since });
-    const feats = j.records.filter(r => r.store === 'features').map(r => r.data);
-    const hers = j.records.filter(r => r.store === 'heritage').map(r => r.data);
-    let changed = (await mergeFeatures(feats)) + (await mergeHeritage(hers));
-    for (const r of j.records.filter(r => r.store === 'deleted')) {
-      if (S.features.has(r.id)) { S.features.delete(r.id); await DB.del('features', r.id); changed++; }
-    }
-    let newPhotos = 0;
-    for (const ph of j.photos) {
-      if (ph.deleted) { if (!DELPH.has(ph.id)) { await forgetPhoto(ph.id); newPhotos++; } continue; }
-      if (DELPH.has(ph.id)) continue;
-      const cur = await DB.get('photos', ph.id);
-      const thumb = ph.thumb ? b64ToBlob(ph.thumb, 'image/webp') : null;
-      if (!cur) { await DB.put('photos', { id: ph.id, cloud: ph.fileId || '', remote: true, created: ph.created, observer: ph.observer, owner: ph.owner, thumb }); newPhotos++; }
-      else if (cur.remote && ((ph.fileId && !cur.cloud) || (thumb && !cur.thumb))) {
-        if (ph.fileId) cur.cloud = ph.fileId;
-        if (thumb && !cur.thumb) cur.thumb = thumb;
-        await DB.put('photos', cur); newPhotos++;
-      }
-    }
-    c.lastPull = j.now; await saveSettings();
-    if (changed || newPhotos) { for (const k of [...S.urls.keys()]) if (!S.urls.get(k)) S.urls.delete(k); renderSurvey(); renderHeritagePoints(); }
-    if (changed) renderHeritage();
-    if (changed || newPhotos) refreshView();
+    if (uploaded) teamSignal();
+    // «synced» only when nothing is left: an unsent photo, a failed thumbnail or a queued record keeps the warning up
+    const left = (await DB.all('photos')).filter(unsentPhoto);
+    const stuck = left.filter(p => p.cloudErrs || thumbsFailed.has(p.id)).length;
+    CLOUD.pendPhotos = left.length;
+    CLOUD.pendRecs = Object.keys(PENDING.ids).length;
     CLOUD.lastOk = Date.now();
-    setCloudState(failed ? 'error' : 'idle', failed ? `${failed} صورة ما انرفعت — راح يعيد المحاولة` : '');
+    setCloudState(stuck || CLOUD.pullErr ? 'error' : 'idle', stuck ? `${stuck} صورة ما انرفعت` : CLOUD.pullErr ? `ما وصل شغل الفريق: ${CLOUD.pullErr}` : '');
   } catch (e) {
     setCloudState(navigator.onLine ? 'error' : 'offline', e.name === 'AbortError' ? 'الخادم بطيء' : e.message);
-  } finally { CLOUD.busy = false; if (CLOUD.again) cloudKick(500); }
+  } finally { CLOUD.busy = false; CLOUD.upTotal = 0; if (CLOUD.again) cloudKick(500); }
+}
+// deletions, thumbnails and records up, then teammates' changes down. Returns the photos whose thumbnail failed.
+async function cloudExchange(c) {
+  // a) photo deletions (the script takes ≤ 200 per call)
+  for (let gone; (gone = Object.keys(PENDING.ids).filter(id => PENDING.ids[id] === 'delphoto').slice(0, 200)).length;) {
+    await cloudCall({ action: 'delPhotos', ids: gone });
+    for (const id of gone) if (PENDING.ids[id] === 'delphoto') delete PENDING.ids[id];
+    await pendingSave();
+  }
+  // b) thumbnails — a few KB each — so the record and its photos reach teammates together
+  const owners = photoOwners();
+  let thumbsSent = 0;
+  const thumbsFailed = new Set();
+  for (const p of (await DB.all('photos')).filter(p => unsentPhoto(p) && !p.thumbSent && p.thumb)) {
+    try {
+      const j = await cloudCall({ action: 'putThumb', id: p.id, thumb: await blobToB64(p.thumb), ownerId: owners.get(p.id)?.id || '', ownerName: owners.get(p.id)?.name || '', meta: photoMeta(p) }, 30000);
+      if (j.deleted) { await forgetPhoto(p.id); continue; }
+      if (DELPH.has(p.id)) continue;
+      p.thumbSent = true; await DB.put('photos', p); thumbsSent++;
+    } catch (e) { if (!navigator.onLine) throw e; thumbsFailed.add(p.id); }
+  }
+  // c) records this phone changed (features, building records, deletions)
+  const recs = [];
+  for (const [id, store] of Object.entries(PENDING.ids)) {
+    if (store === 'delphoto') continue;
+    if (store === 'features' && S.features.has(id)) { const f = S.features.get(id); recs.push({ id, store, updated: f.properties.updated, data: f }); }
+    else if (store === 'heritage' && S.heritage.has(id)) { const r = S.heritage.get(id); recs.push({ id, store, updated: r.updated, data: r }); }
+    else if (store === 'deleted') recs.push({ id, store, updated: (await DB.get('meta', 'del:' + id))?.updated || nowIso(), data: { id } });
+    else delete PENDING.ids[id];
+  }
+  CLOUD.pendRecs = recs.length;
+  for (let i = 0; i < recs.length; i += 40) {
+    const batch = recs.slice(i, i + 40);
+    await cloudCall({ action: 'putRecords', records: batch });
+    // done — unless it was edited again while uploading
+    for (const r of batch) {
+      const cur = r.store === 'features' ? S.features.get(r.id)?.properties.updated : r.store === 'heritage' ? S.heritage.get(r.id)?.updated : r.updated;
+      if (cur === r.updated && PENDING.ids[r.id] === r.store) delete PENDING.ids[r.id];
+    }
+    await pendingSave();
+  }
+  CLOUD.pendRecs = Object.keys(PENDING.ids).length;
+  if (recs.length || thumbsSent) teamSignal();          // teammates fetch it right away instead of in 2 minutes
+  // d) teammates' changes — a failing pull is reported but never holds back this phone's uploads
+  try { await cloudPull(c); CLOUD.pullErr = ''; }
+  catch (e) { if (!navigator.onLine) throw e; CLOUD.pullErr = e.name === 'AbortError' ? 'الخادم بطيء' : e.message; }
+  return thumbsFailed;
+}
+// pull teammates' changes (2-minute overlap covers writes that raced the previous pull)
+async function cloudPull(c) {
+  const since = c.lastPull ? new Date(new Date(c.lastPull).getTime() - 120000).toISOString() : '';
+  const j = await cloudCall({ action: 'pull', since });
+  const feats = j.records.filter(r => r.store === 'features').map(r => r.data);
+  const hers = j.records.filter(r => r.store === 'heritage').map(r => r.data);
+  let changed = (await mergeFeatures(feats)) + (await mergeHeritage(hers));
+  for (const r of j.records.filter(r => r.store === 'deleted')) {
+    const previous = await DB.get('meta', 'del:' + r.id);
+    const updated = r.updated || j.now;
+    if (!previous || (previous.updated || '') < updated) await DB.put('meta', { id: 'del:' + r.id, updated });
+    if (S.features.has(r.id)) { S.features.delete(r.id); await DB.del('features', r.id); changed++; }
+  }
+  let newPhotos = 0;
+  for (const ph of j.photos) {
+    if (ph.deleted) { if (!DELPH.has(ph.id)) { await forgetPhoto(ph.id); newPhotos++; } continue; }
+    if (DELPH.has(ph.id)) continue;
+    const cur = await DB.get('photos', ph.id);
+    const thumb = ph.thumb ? b64ToBlob(ph.thumb, 'image/webp') : null;
+    if (!cur) { await DB.put('photos', { id: ph.id, cloud: ph.fileId || '', remote: true, created: ph.created, observer: ph.observer, owner: ph.owner, thumb }); newPhotos++; }
+    else if (cur.remote && ((ph.fileId && !cur.cloud) || (thumb && !cur.thumb))) {
+      if (ph.fileId) cur.cloud = ph.fileId;
+      if (thumb && !cur.thumb) cur.thumb = thumb;
+      await DB.put('photos', cur); newPhotos++;
+    }
+  }
+  c.lastPull = j.now; await saveSettings();
+  if (changed || newPhotos) { for (const k of [...S.urls.keys()]) if (!S.urls.get(k)) S.urls.delete(k); renderSurvey(); renderHeritagePoints(); }
+  if (changed) renderHeritage();
+  if (changed || newPhotos) refreshView();
 }
 // the team cloud was reset (cloud/Code.gs resetForNewSurvey): drop this phone's data from before the reset.
 // Anything made after the reset stays and is uploaded.
@@ -2601,7 +2663,7 @@ function importFile() {
           const meta = zip.file('photos_meta.json') ? JSON.parse(await zip.file('photos_meta.json').async('string')) : [];
           for (const entry of Object.values(zip.files)) {
             const m = entry.name.match(/^photos\/(.+)\.(jpg|webp)$/); if (!m) continue;
-            if (await DB.get('photos', m[1])) continue;
+            if (DELPH.has(m[1]) || await DB.get('photos', m[1])) continue;     // a deleted photo stays deleted
             const blob = await entry.async('blob');
             const thumb = await compressImage(new File([blob], 'x.' + m[2], { type: m[2] === 'webp' ? 'image/webp' : 'image/jpeg' }), 320, .62);
             const pm = meta.find(x => x && x.id === m[1]) || {};
@@ -2615,12 +2677,13 @@ function importFile() {
             const p = { ...f.properties }; if (typeof p.photos === 'string') p.photos = p.photos ? p.photos.split(';') : [];
             if (!p.id) p.id = uid('F'); if (!p.kind) p.kind = f.geometry.type === 'Point' ? 'point' : /Line/.test(f.geometry.type) ? 'line' : 'polygon';
             if (!p.category) p.category = 'other'; return { ...f, properties: p };
-          }));
+          }), true);
         }
       } catch (e) { console.error(e); toast('ملف غير صالح: ' + file.name); }
     }
     renderSurvey(); renderHeritage();
     toast(`اندمج: ${nF} عنصر، ${nH} مبنى حفاظ، ${nP} صورة`, 4500);
+    if (nF || nH || nP) cloudKick(1500);          // imported work goes to the team cloud by itself
   };
   inp.click();
 }
@@ -2638,6 +2701,7 @@ async function mergeFeatures(list, mine) {
   let n = 0;
   for (const f of list) {
     const id = f.properties?.id; if (!id || !f.geometry) continue;
+    if (mine && await DB.get('meta', 'del:' + id).catch(() => null)) continue;   // an import never brings back a deleted feature
     const cur = S.features.get(id);
     if (cur && (cur.properties.updated || '') >= (f.properties.updated || '')) {
       if (unionPhotos(cur.properties, f.properties)) { await DB.put('features', { id, feature: cur }); n++; }
@@ -2757,6 +2821,9 @@ async function doSearch(q, remote) {
 map.on('contextmenu', e => editFeature({ type: 'Point', coordinates: [e.latlng.lng, e.latlng.lat] }, 'point'));
 map.on('click', () => { if (S.selected && !$('#sheet').hidden) closeSheet(); });
 $('#btnSite').onclick = () => map.flyTo(SITE_CENTER, SITE_ZOOM);
+
+// tests/sync.test.js runs this file in Node with stubbed browser APIs and reaches the sync internals here
+if (typeof globalThis.__ssmTest === 'function') globalThis.__ssmTest({ S, DB, CLOUD, PENDING, DELPH, cloudSync, cloudStatusHtml, photoDue, putHeritage, importFile });
 
 // ---------------------------------------------------------------- boot
 (async () => {
