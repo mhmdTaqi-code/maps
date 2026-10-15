@@ -3,7 +3,7 @@
 'use strict';
 
 // ---------------------------------------------------------------- constants
-const DATA_VERSION = '36';    // bump when files in data/ change (also in sw.js)
+const DATA_VERSION = '37';    // bump when files in data/ change (also in sw.js)
 const SITE_CENTER = [33.3387, 44.3935];
 const SITE_ZOOM = 17;
 const BAGHDAD_VIEWBOX = '44.20,33.45,44.55,33.20';
@@ -873,7 +873,7 @@ const PANELS = {
     openSheet('المزيد', `
       <label class="f"><span>اسم الراصد (يظهر على كل شي تسجله)</span><input id="obs" value="${esc(S.settings.observer)}" placeholder="مثلاً: محمد تقي"></label>
       <h3>مشاركة البيانات مع الفريق</h3>
-      <p class="muted">كل واحد يرصد على تلفونه. بنهاية اليوم كلكم صدّروا ملف ZIP ودزّوه بالكروب، وواحد يستورد كل الملفات حتى تندمج بخريطة وحدة.</p>
+      <p class="muted">صوركم ومواقع الرصد تتزامن تلقائياً مع الفريق من تفتحون الموقع ويتوفر النت، بدون استيراد. ملفات ZIP تبقى للنسخ الاحتياطي أو نقل البيانات عند الحاجة.</p>
       <div class="row">
         <button class="btn primary" id="exZip">تصدير ZIP (مع الصور)</button>
         <button class="btn" id="share">مشاركة</button>
