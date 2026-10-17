@@ -3,7 +3,7 @@
 'use strict';
 
 // ---------------------------------------------------------------- constants
-const DATA_VERSION = '37';    // bump when files in data/ change (also in sw.js)
+const DATA_VERSION = '38';    // bump when files in data/ change (also in sw.js)
 const SITE_CENTER = [33.3387, 44.3935];
 const SITE_ZOOM = 17;
 const BAGHDAD_VIEWBOX = '44.20,33.45,44.55,33.20';
@@ -886,23 +886,7 @@ const PANELS = {
       <h3>☁️ المزامنة السحابية (Google Drive)</h3>
       <p class="muted" id="cloudStatus" style="margin-top:0">${cloudStatusHtml()}</p>
       <div class="row"><button class="btn primary" id="cTest">فحص الاتصال</button><button class="btn" id="cNow">زامن هسه</button></div>
-      <details class="howto"><summary>إعدادات متقدمة</summary>
-        <label class="f" style="margin-top:8px"><span>رابط السكربت (Web app URL)</span><input id="cUrl" dir="ltr" value="${esc(cloudCfg().url)}"></label>
-        <label class="f"><span>كلمة السر (إذا السكربت مقفول)</span><input id="cKey" dir="ltr" type="password" value="${esc(cloudCfg().key === 'open' ? '' : cloudCfg().key)}"></label>
-      </details>
-      ${cloudOn() ? '<div class="row" style="margin-top:8px"><button class="btn" id="cInvite">إرسال رابط المزامنة للفريق</button></div>' : ''}
-      <details class="howto"><summary>شلون تشتغل؟</summary>
-        <p>كل صورة تصوّرونها تنرفع تلقائياً لـ Google Drive الفريق، بمجلد باسم المبنى، واسم الملف بيه التاريخ واسم المصوّر. وكل تلفون يسحب صور وسجلات الباقين ويعرضها بالخريطة وبـ «السجل ← 📷 الصور». ماكو أي إعداد — بس افتحوا الموقع.</p>
-        <p style="margin-bottom:0">لإعداد سكربت جديد بحساب ثاني:</p>
-        <ol>
-          <li>افتح <a href="https://script.google.com/home/projects/create" target="_blank" rel="noopener">script.google.com</a> بحساب Google (حساب الجامعة إذا مساحته أكبر).</li>
-          <li>امسح الموجود والصق كود <a href="https://github.com/mhmdTaqi-code/maps/blob/main/cloud/Code.gs" target="_blank" rel="noopener">Code.gs</a>.</li>
-          <li>Deploy ← New deployment ← Web app ← Execute as: <b>Me</b> ← Who has access: <b>Anyone</b> ← Deploy، ووافق على الصلاحيات.</li>
-          <li>الصق رابط الـ Web app (ينتهي بـ /exec) بـ <code>WEBAPP_URL</code> بالكود، احفظ، واختار الدالة <code>setup</code> ودوس Run. تطلع كلمة سر عشوائية و<b>رابط انضمام</b> بتبويب «الإعداد» بجدول السجل بالـ Drive.</li>
-          <li>افتح رابط الانضمام بالتلفون — التطبيق يتفعّل وحده — ودزّه للفريق.</li>
-        </ol>
-        <p>الصور تنحفظ بمجلد «مسح السايت» بـ Drive مالتك، كل مبنى بمجلد، والسجل بجدول Google Sheets بنفس المجلد. محد يكدر يوصلها بدون كلمة السر.</p>
-      </details>
+      <p class="muted">كل واحد يفتح الموقع يشوف صور السايت كلها ويكدر يضيف عليها ويحذف — ماكو أي إعداد. الصور تنحفظ بالـ Drive، كل مبنى بمجلد.</p>
       <h3>التخزين على هذا الجهاز</h3>
       <p class="muted" id="storageInfo">جاري الحساب…</p>
       <label class="f"><span>جودة الصور المرفوعة للـ Drive</span></label>
@@ -933,9 +917,7 @@ const PANELS = {
       $('.chips[data-name="pq"]', body).addEventListener('change', () => { S.settings.photoQuality = chipVal(body, 'pq') || 'original'; saveSettings(); toast(S.settings.photoQuality === 'original' ? 'الصور الجديدة تنرفع بجودتها الأصلية' : 'الصور الجديدة تنضغط قبل الرفع'); });
       storageInfo($('#storageInfo', body)).catch(() => { $('#storageInfo', body).textContent = 'التخزين المحلي مقفول — سدّ كل تبويبات الموقع وافتحه من جديد.'; });
       $('#cTest', body).onclick = async e => {
-        const c = cloudCfg(); c.url = $('#cUrl', body).value.trim() || TEAM_CLOUD_URL; c.key = $('#cKey', body).value.trim() || 'open';
-        if (!/^https:\/\//.test(c.url)) return toast('الرابط غير صالح');
-        await saveSettings(); e.target.disabled = true; $('#cloudStatus', body).textContent = '⏳ جاري الاختبار…';
+        e.target.disabled = true; $('#cloudStatus', body).textContent = '⏳ جاري الاختبار…';
         try {
           const j = await cloudCall({ action: 'ping' }, 30000);
           const gb = v => (v / 1073741824).toFixed(1) + ' GB';
@@ -943,12 +925,6 @@ const PANELS = {
           cloudStart();
         } catch (err) { $('#cloudStatus', body).textContent = '⚠ ما اشتغل: ' + (err.message === 'bad key' ? 'كلمة السر غلط' : err.message); }
         e.target.disabled = false;
-      };
-      const inv = $('#cInvite', body);
-      if (inv) inv.onclick = async () => {
-        const text = `فعّل مزامنة مسح السايت (افتحه بالتلفون):\n${cloudJoinLink()}`;
-        if (navigator.share) { try { await navigator.share({ title: 'مزامنة مسح السايت', text }); return; } catch (e) { if (e.name === 'AbortError') return; } }
-        try { await navigator.clipboard.writeText(text); toast('انسخ — دزّه للفريق بس'); } catch { prompt('انسخ:', text); }
       };
       $('#cNow', body).onclick = () => { if (!cloudOn()) return toast('فعّل المزامنة أول'); cloudSync(); };
       $('.chips[data-name="theme"]', body).addEventListener('change', () => { S.settings.theme = chipVal(body, 'theme') || 'auto'; applyTheme(); saveSettings(); });
@@ -1571,14 +1547,10 @@ const myColor = () => TEAM_COLORS[[...deviceId].reduce((a, c) => (a * 31 + c.cha
 const SITE_TEAM_CODE = 'RUSAF-AMAPS';   // the site's own team — everyone who opens the app is in it
 const teamSettings = () => {
   const t = (S.settings.team ||= { code: null, sharing: false, viewing: true });
-  if (!t.code && !t.left) t.code = SITE_TEAM_CODE;
+  t.code = SITE_TEAM_CODE; delete t.left;       // no groups: one site, everyone in it
   return t;
 };
 const normCode = c => (c || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-function newTeamCode() {
-  const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789', r = crypto.getRandomValues(new Uint8Array(10));
-  const s = [...r].map(b => A[b % A.length]).join(''); return s.slice(0, 5) + '-' + s.slice(5);
-}
 
 // ---- crypto
 const b64 = u8 => btoa(String.fromCharCode(...u8));
@@ -1628,7 +1600,7 @@ async function googleLoc() {
   clearTimeout(TEAM.g.timer);
   const ts = teamSettings();
   if (!ts.code || !TEAM.topic || !cloudOn()) return;
-  const next = () => { TEAM.g.timer = setTimeout(googleLoc, document.hidden ? 30000 : TEAM.up.size ? 15000 : 10000); };
+  const next = () => { TEAM.g.timer = setTimeout(googleLoc, (document.hidden ? 45000 : TEAM.up.size ? 30000 : 12000) * (0.85 + Math.random() * 0.3)); };
   if (TEAM.g.busy || !navigator.onLine) return next();
   TEAM.g.busy = true;
   try {
@@ -1831,38 +1803,18 @@ function openWelcome() {
 }
 function openTeam() {
   const ts = teamSettings();
-  const link = ts.code ? `${location.origin}${location.pathname}#team=${normCode(ts.code)}` : '';
-  openSheet('الفريق — مواقع الأصدقاء', ts.code ? `
+  openSheet('الفريق — مواقع الأصدقاء', `
     <p class="muted" id="teamStatus" style="margin-top:0"></p>
-    <div class="team-code"><span>كود الفريق</span><b dir="ltr">${esc(ts.code)}</b></div>
-    <div class="row" style="margin:8px 0"><button class="btn primary" id="tShare">إرسال الكود للأصدقاء</button><button class="btn" id="tCopy">نسخ الرابط</button></div>
     <label class="f"><span>اسمك (يشوفه الفريق)</span><input id="tName" value="${esc(S.settings.observer)}" placeholder="مثلاً: محمد تقي"></label>
     ${swHtml('sharing', 'شارك موقعي مع الفريق', 'الشاشة تبقى شغّالة وأنت تشارك — إذا قفلتها يوقف لحد ما ترجع للتطبيق', ts.sharing, `background:${myColor()};border-radius:50%`)}
     ${swHtml('viewing', 'اعرض الفريق على الخريطة', '', ts.viewing)}
     <h3>الأعضاء</h3><div id="teamList"></div>
-    <hr><p class="muted">🔒 المواقع تنتقل بطريقين بنفس الوقت: خوادم مباشرة (أسرع) وسكربت Google مال الفريق (احتياطي إذا وكعت الخوادم). مشفّرة من التلفون للتلفون بكود الفريق — محد بالطريق يكدر يقراها. أي واحد عنده الكود يشوف المواقع، فلا تنشروه برّه الفريق. لمن توقف المشاركة ينمسح موقعك.</p>
-    <button class="btn danger block" id="tLeave">مغادرة الفريق</button>` : `
-    <p class="muted" style="margin-top:0">شوفوا بعض على الخريطة وأنتم بالسايت. واحد يسوّي فريق ويدز الكود للباقين.</p>
-    <label class="f"><span>اسمك (يشوفه الفريق)</span><input id="tName" value="${esc(S.settings.observer)}" placeholder="مثلاً: محمد تقي"></label>
-    <button class="btn primary block" id="tNew">سوّي فريق جديد</button>
-    <h3>أو انضم لفريق</h3>
-    <label class="f"><input id="tCode" placeholder="الكود مثل: K7Q2M-XR4PA" dir="ltr" autocapitalize="characters"></label>
-    <button class="btn block" id="tJoin">انضم</button>`, body => {
+    <hr><p class="muted">كل واحد يفتح الموقع يكون ويه الفريق تلقائياً — ماكو كود ولا روابط. المواقع تنتقل بطريقين بنفس الوقت: خوادم مباشرة (أسرع) وسكربت Google (احتياطي)، ومشفّرة بالطريق. لمن توقف المشاركة ينمسح موقعك.</p>`, body => {
     $('#sheet').dataset.panel = 'team';
     const nameOk = () => { const n = $('#tName', body).value.trim(); if (!n) { toast('اكتب اسمك أول'); $('#tName', body).focus(); return false; } S.settings.observer = n; saveSettings(); return true; };
     $('#tName', body).onchange = () => { S.settings.observer = $('#tName', body).value.trim(); saveSettings(); if (ts.sharing) teamPublish(true); };
-    const join = async code => { if (!nameOk()) return; ts.code = code; ts.viewing = true; saveSettings(); await teamConnect(); openTeam(); };
-    if (!ts.code) {
-      $('#tNew', body).onclick = () => join(newTeamCode());
-      $('#tJoin', body).onclick = () => { const c = normCode($('#tCode', body).value); if (c.length < 8) return toast('الكود ناقص'); join(c.slice(0, 5) + '-' + c.slice(5)); };
-    } else {
+    {
       renderTeamList();
-      $('#tShare', body).onclick = async () => {
-        const text = `انضم لفريق مسح السايت حتى نشوف مواقع بعض:\n${link}\nالكود: ${ts.code}`;
-        if (navigator.share) { try { await navigator.share({ title: 'فريق مسح السايت', text }); return; } catch (e) { if (e.name === 'AbortError') return; } }
-        try { await navigator.clipboard.writeText(text); toast('انسخ — الصقه بالكروب'); } catch { prompt('انسخ هذا وأرسله:', text); }
-      };
-      $('#tCopy', body).onclick = async () => { try { await navigator.clipboard.writeText(link); toast('انسخ الرابط'); } catch { prompt('الرابط:', link); } };
       body.addEventListener('click', async e => {
         const sw = e.target.closest('.switch');
         if (sw) {
@@ -1881,47 +1833,11 @@ function openTeam() {
         const it = e.target.closest('[data-mate]');
         if (it) { const m = TEAM.members.get(it.dataset.mate); if (m?.la != null) { map.flyTo([m.la, m.lo], 19); closeSheet(); } }
       });
-      $('#tLeave', body).onclick = async () => {
-        if (!confirm('تطلع من الفريق وتوقف مشاركة موقعك؟')) return;
-        if (ts.sharing) await teamStopSharing();
-        Object.assign(ts, { code: null, sharing: false, left: true }); saveSettings();
-        teamDisconnect(); TEAM.members.clear(); renderTeam(); closeSheet(); toast('طلعت من الفريق');
-      };
     }
     return () => { delete $('#sheet').dataset.panel; };
   });
 }
 $('#btnTeam').onclick = openTeam;
-
-// joining from a shared link: https://…/maps/#team=CODE
-// cloud join link (made by the Apps Script `setup`): https://…/maps/#cloud=<encoded web app url>~<key>
-async function cloudFromLink() {
-  const m = location.hash.match(/cloud=([^~&]+)~([A-Za-z0-9]+)/); if (!m) return;
-  history.replaceState(null, '', location.pathname + location.search);
-  const url = decodeURIComponent(m[1]);
-  if (!/^https:\/\/script\.google(usercontent)?\.com\//.test(url)) return toast('رابط المزامنة غير صالح');
-  const c = cloudCfg();
-  if (c.url === url && c.key === m[2]) return;
-  if (!confirm('تفعّل المزامنة السحابية مع Drive الفريق؟ صورك وسجلاتك راح تنرفع وتشوف شغل الباقين.')) return;
-  Object.assign(c, { url, key: m[2], lastPull: '', lastPush: '' }); await saveSettings();
-  try { const j = await cloudCall({ action: 'ping' }, 30000); toast(`✓ المزامنة شغّالة — بالسحابة ${j.photos} صورة`, 4000); }
-  catch (e) { toast('⚠ ما اشتغلت المزامنة: ' + e.message, 5000); }
-  cloudStart();
-}
-// the same link, so a teammate who is already set up can invite others
-function cloudJoinLink() { const c = cloudCfg(); return `${location.origin}${location.pathname}#cloud=${encodeURIComponent(c.url)}~${c.key}`; }
-async function teamFromLink() {
-  const m = location.hash.match(/team=([A-Za-z0-9-]+)/); if (!m) return;
-  history.replaceState(null, '', location.pathname + location.search);
-  const c = normCode(m[1]); if (c.length < 8) return;
-  const code = c.slice(0, 5) + '-' + c.slice(5), ts = teamSettings();
-  if (ts.code === code) return;
-  if (!confirm(`تنضم لفريق ${code} حتى تشوفون مواقع بعض؟`)) return;
-  if (ts.sharing) await teamStopSharing();
-  Object.assign(ts, { code, sharing: false, viewing: true }); saveSettings();
-  await teamConnect(); openTeam();
-}
-
 
 // ---------------------------------------------------------------- team cloud: Google Drive via the user's Apps Script
 // Photos are uploaded once (sequentially, resumable), records are pushed when they change and pulled
@@ -1931,7 +1847,8 @@ const CLOUD = { busy: false, again: false, wants: 0, exchangeEvery: 60000, timer
 const TEAM_CLOUD_URL = 'https://script.google.com/macros/s/AKfycbzabFq7IVXtCGArW3T26G8PnlX5bmAh7XYpk89QOR5iO_bs-wsRCfCAgQZvgE8p8a-0gA/exec';
 const cloudCfg = () => {
   const c = (S.settings.cloud ||= { url: '', key: '', lastPull: '', lastPush: '' });
-  if (!c.url) { c.url = TEAM_CLOUD_URL; c.key = c.key || 'open'; }
+  // one site, one cloud: a phone that pointed at another (test / private) script starts over with the site's
+  if (c.url !== TEAM_CLOUD_URL) { if (c.url) c.lastPull = ''; c.url = TEAM_CLOUD_URL; c.key = 'open'; }
   return c;
 };
 const cloudOn = () => { const c = cloudCfg(); return !!(c.url && c.key); };
@@ -1945,8 +1862,9 @@ async function cloudCall(body, timeoutMs = 60000) {
     const head = JSON.stringify({ ...rest, key: c.key, device: deviceId });
     const payload = typeof data === 'string' ? new Blob([head.slice(0, -1), ',"data":"', data, '"}']) : head;
     const r = await fetch(c.url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: payload, signal: ctl.signal, redirect: 'follow' });
-    const j = await r.json();
-    if (!j.ok) throw new Error(j.error || 'cloud error');
+    let j;
+    try { j = await r.json(); } catch { throw Object.assign(new Error('الخادم مشغول'), { transient: true }); }   // HTML error page = overloaded
+    if (!j.ok) throw Object.assign(new Error(j.error || 'cloud error'), { transient: !!j.busy || /lock|too many|timed? ?out|service|exceeded|internal|busy|rate/i.test(j.error || '') });
     return j;
   } finally { clearTimeout(to); }
 }
@@ -2018,6 +1936,7 @@ async function cloudBackfill() {
   return n;
 }
 
+const retryDelay = () => Math.min(120000, 4000 * 2 ** Math.min(CLOUD.fails || 1, 5)) * (0.6 + Math.random() * 0.8);
 async function cloudSync() {
   if (!cloudOn()) return;
   if (CLOUD.busy) { CLOUD.again = true; CLOUD.wants++; return; }   // run once more right after this one
@@ -2043,7 +1962,7 @@ async function cloudSync() {
     //    when something new was saved) the small things run again in between.
     const queue = (await DB.all('photos')).filter(p => unsentPhoto(p) && photoDue(p)).sort((a, b) => (a.cloudErrs || 0) - (b.cloudErrs || 0));
     CLOUD.upTotal = queue.length; CLOUD.up = 0;
-    let uploaded = 0;
+    let uploaded = 0, serverBusy = false;
     for (const { id } of queue) {
       if (!navigator.onLine) throw new Error('انقطع النت');
       if (Date.now() - exchangedAt >= CLOUD.exchangeEvery || CLOUD.wants !== wants) { wants = CLOUD.wants; thumbsFailed = await cloudExchange(c); exchangedAt = Date.now(); }
@@ -2064,6 +1983,7 @@ async function cloudSync() {
         if (preview && await storageTight()) { p.blob = preview; p.slim = true; }
       } catch (e) {
         if (!navigator.onLine) throw e;
+        if (e.transient || e.name === 'AbortError' || e.name === 'TypeError') { serverBusy = true; break; }   // server busy: not the photo's fault, retry the sync soon
         p.cloudErrs = (p.cloudErrs || 0) + 1; p.cloudErrAt = Date.now();
       }
       if (DELPH.has(p.id)) continue;                  // deleted while it was uploading: don't bring it back
@@ -2079,8 +1999,12 @@ async function cloudSync() {
     CLOUD.pendRecs = Object.keys(PENDING.ids).length;
     CLOUD.lastOk = Date.now();
     setCloudState(stuck || CLOUD.pullErr ? 'error' : 'idle', stuck ? `${stuck} صورة ما انرفعت` : CLOUD.pullErr ? `ما وصل شغل الفريق: ${CLOUD.pullErr}` : '');
+    CLOUD.fails = serverBusy ? (CLOUD.fails || 0) + 1 : 0;
+    if (serverBusy) cloudKick(retryDelay());
   } catch (e) {
     setCloudState(navigator.onLine ? 'error' : 'offline', e.name === 'AbortError' ? 'الخادم بطيء' : e.message);
+    CLOUD.fails = (CLOUD.fails || 0) + 1;
+    if (navigator.onLine) cloudKick(retryDelay());
   } finally { CLOUD.busy = false; CLOUD.upTotal = 0; if (CLOUD.again) cloudKick(500); }
 }
 // deletions, thumbnails and records up, then teammates' changes down. Returns the photos whose thumbnail failed.
@@ -2144,11 +2068,13 @@ async function cloudPull(c) {
     if (S.features.has(r.id)) { S.features.delete(r.id); await DB.del('features', r.id); changed++; }
   }
   let newPhotos = 0;
+  const noThumb = [];                     // a first pull lists the photos without their thumbnails (server v9)
   for (const ph of j.photos) {
     if (ph.deleted) { if (!DELPH.has(ph.id)) { await forgetPhoto(ph.id); newPhotos++; } continue; }
     if (DELPH.has(ph.id)) continue;
     const cur = await DB.get('photos', ph.id);
     const thumb = ph.thumb ? b64ToBlob(ph.thumb, 'image/webp') : null;
+    if (j.thumbs === false && !thumb && !cur?.thumb && !(cur && !cur.remote)) noThumb.push(ph.id);
     if (!cur) { await DB.put('photos', { id: ph.id, cloud: ph.fileId || '', remote: true, created: ph.created, observer: ph.observer, owner: ph.owner, thumb }); newPhotos++; }
     else if (cur.remote && ((ph.fileId && !cur.cloud) || (thumb && !cur.thumb))) {
       if (ph.fileId) cur.cloud = ph.fileId;
@@ -2160,6 +2086,7 @@ async function cloudPull(c) {
   if (changed || newPhotos) { for (const k of [...S.urls.keys()]) if (!S.urls.get(k)) S.urls.delete(k); renderSurvey(); renderHeritagePoints(); }
   if (changed) renderHeritage();
   if (changed || newPhotos) refreshView();
+  if (noThumb.length) { await fetchThumbsNow(noThumb.slice(0, 600)); renderSurvey(); renderHeritagePoints(); refreshView(); }
 }
 // the team cloud was reset (cloud/Code.gs resetForNewSurvey): drop this phone's data from before the reset.
 // Anything made after the reset stays and is uploaded.
@@ -2198,7 +2125,43 @@ function cloudStart() {
 addEventListener('online', () => cloudKick(1000));
 
 // a photo that lives only in the cloud (taken by a teammate): fetch through the script and keep it
+const THUMBQ = { ids: new Map(), timer: null };
+function queueThumb(id) {
+  return new Promise(res => {
+    if (!THUMBQ.ids.has(id)) THUMBQ.ids.set(id, []);
+    THUMBQ.ids.get(id).push(res);
+    clearTimeout(THUMBQ.timer);
+    THUMBQ.timer = setTimeout(flushThumbs, THUMBQ.ids.size >= 50 ? 0 : 80);
+  });
+}
+// thumbnails for a list of photos, 50 per request; also answers anyone already waiting for one of them
+async function fetchThumbsNow(ids) {
+  for (let i = 0; i < ids.length; i += 50) {
+    const batch = ids.slice(i, i + 50);
+    let got = {};
+    try { got = (await cloudCall({ action: 'thumbs', ids: batch }, 60000)).thumbs || {}; } catch { return; }
+    for (const id of batch) {
+      const waiters = THUMBQ.ids.get(id) || []; THUMBQ.ids.delete(id);
+      let blob = null;
+      if (got[id]) { blob = b64ToBlob(got[id], 'image/webp'); const p = await DB.get('photos', id); if (p && !p.thumb) { p.thumb = blob; await DB.put('photos', p); } }
+      waiters.forEach(w => w(blob));
+    }
+  }
+}
+async function flushThumbs() {
+  const batch = [...THUMBQ.ids].slice(0, 50); batch.forEach(([id]) => THUMBQ.ids.delete(id));
+  if (!batch.length) return;
+  if (THUMBQ.ids.size) THUMBQ.timer = setTimeout(flushThumbs, 0);
+  let got = {};
+  try { got = (await cloudCall({ action: 'thumbs', ids: batch.map(([id]) => id) }, 60000)).thumbs || {}; } catch {}
+  for (const [id, waiters] of batch) {
+    let blob = null;
+    if (got[id]) { blob = b64ToBlob(got[id], 'image/webp'); const p = await DB.get('photos', id); if (p) { p.thumb = blob; await DB.put('photos', p); } }
+    waiters.forEach(w => w(blob));
+  }
+}
 async function cloudPhotoBlob(p, thumb) {
+  if (thumb && !p.thumb) { const b = await queueThumb(p.id); if (b) return b; }
   if (!p.cloud) return thumb ? null : p.thumb || null;           // original still uploading from its phone
   const j = await cloudCall({ action: 'getPhoto', fileId: p.cloud, size: thumb ? 'thumb' : 'preview' }, 90000);
   const blob = b64ToBlob(j.data, j.mime);
@@ -2823,7 +2786,7 @@ map.on('click', () => { if (S.selected && !$('#sheet').hidden) closeSheet(); });
 $('#btnSite').onclick = () => map.flyTo(SITE_CENTER, SITE_ZOOM);
 
 // tests/sync.test.js runs this file in Node with stubbed browser APIs and reaches the sync internals here
-if (typeof globalThis.__ssmTest === 'function') globalThis.__ssmTest({ S, DB, CLOUD, PENDING, DELPH, cloudSync, cloudStatusHtml, photoDue, putHeritage, importFile });
+if (typeof globalThis.__ssmTest === 'function') globalThis.__ssmTest({ S, DB, CLOUD, PENDING, DELPH, cloudSync, cloudStatusHtml, photoDue, putHeritage, importFile, photoUrl });
 
 // ---------------------------------------------------------------- boot
 (async () => {
@@ -2838,8 +2801,7 @@ if (typeof globalThis.__ssmTest === 'function') globalThis.__ssmTest({ S, DB, CL
   if (teamSettings().sharing || S.settings.gpsOn) startGps();
   if (!S.settings.welcomed) setTimeout(openWelcome, 900);
   setTimeout(storageWarnings, 2500);
-  teamFromLink();
-  await cloudFromLink();
+  if (/#(team|cloud)=/.test(location.hash)) history.replaceState(null, '', location.pathname + location.search);
   cloudStart();
   $$('.modes button').forEach(b => b.classList.toggle('on', b.dataset.mode === S.settings.mode));
   applyLayerVisibility();

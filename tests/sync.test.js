@@ -31,11 +31,12 @@ const clone = v => v instanceof Blob || v === null || typeof v !== 'object' ? v
   : Array.isArray(v) ? v.map(clone) : Object.fromEntries(Object.entries(v).map(([k, x]) => [k, clone(x)]));
 
 // ---- fake team cloud: the parts of cloud/Code.gs the app's sync uses
+const BUSY = Symbol('Apps Script overloaded: HTML error page instead of JSON');
 function fakeCloud() {
   const t0 = Date.parse('2026-10-14T08:00:00Z');
   let n = 0;
   const now = () => new Date(t0 + (++n) * 1000).toISOString();
-  const s = { records: new Map(), photos: new Map(), calls: [], fail: {}, onCall: null, now };
+  const s = { records: new Map(), photos: new Map(), calls: [], fail: {}, busy: {}, onCall: null, now };
   const deleted = () => new Set([...s.photos.values()].filter(p => p.deleted).map(p => p.id));
   const mergePhotoLists = (into, from) => {
     const a = into && (into.properties || into), b = from && (from.properties || from);
@@ -56,6 +57,8 @@ function fakeCloud() {
     s.calls.push(req);
     if (s.onCall) await s.onCall(req);
     if (s.fail[req.action]?.(req)) return { ok: false, error: 'injected failure' };
+    if (s.lockTimeout?.[req.action]?.(req)) return { ok: false, busy: true, error: 'مهلة التأمين: كانت هناك عملية أخرى تؤجل التأمين لفترة طويلة جدًا.' };
+    if (s.busy[req.action]?.(req)) return BUSY;
     switch (req.action) {
       case 'epoch': return { ok: true, epoch: '' };
       case 'putThumb': {
@@ -107,8 +110,13 @@ function fakeCloud() {
         const t = now(), since = String(req.since || '');
         const records = [...s.records.values()].filter(r => r.synced > since).map(r => ({ id: r.id, store: r.store, updated: r.updated, data: clone(r.data) }));
         const photos = [...s.photos.values()].filter(p => p.synced > since)
-          .map(p => p.deleted ? { id: p.id, deleted: true } : { id: p.id, fileId: p.fileId || '', owner: '', created: '', observer: '', thumb: p.thumb || '' });
-        return { ok: true, records, photos, now: t };
+          .map(p => p.deleted ? { id: p.id, deleted: true } : { id: p.id, fileId: p.fileId || '', owner: '', created: '', observer: '', thumb: since ? p.thumb || '' : '' });
+        return { ok: true, records, photos, now: t, thumbs: !!since };
+      }
+      case 'thumbs': {
+        const thumbs = {};
+        for (const id of (req.ids || []).slice(0, 60)) { const p = s.photos.get(id); if (p && !p.deleted && p.thumb) thumbs[id] = p.thumb; }
+        return { ok: true, thumbs };
       }
       default: return { ok: false, error: 'unknown action ' + req.action };
     }
@@ -138,6 +146,7 @@ async function loadApp({ seed = {}, cloud = fakeCloud() } = {}) {
     if (!/^https:\/\/script\.google\.com\//.test(url)) throw new Error('unexpected fetch ' + url);
     const text = typeof opts.body === 'string' ? opts.body : await opts.body.text();
     const res = await cloud.handle(JSON.parse(text));
+    if (res === BUSY) return { ok: true, json: async () => { throw new SyntaxError("Unexpected token '<', \"<!DOCTYPE \"... is not valid JSON"); } };
     return { ok: true, json: async () => JSON.parse(JSON.stringify(res)) };
   };
   const mem = () => { const m = new Map(); return { getItem: k => m.get(k) ?? null, setItem: (k, v) => m.set(k, String(v)), removeItem: k => m.delete(k) }; };
@@ -415,4 +424,57 @@ test('more than 200 photo deletions are all delivered (the script takes 200 per 
   assert.equal(cloud.calls.filter(c => c.action === 'delPhotos').length, 2);
   assert.ok(ids.every(id => cloud.photos.get(id)?.deleted));
   assert.deepEqual({ ...app.PENDING.ids }, {});
+});
+
+test('an overloaded server does not count against a photo: no retry penalty, a soon randomised retry, uploaded next time', async () => {
+  const { app, cloud, stores, timers } = await loadApp({ seed: {
+    photos: [localPhoto('PB1')],
+    heritage: [{ id: 'HP4', photos: ['PB1'], updated: '2026-10-14T07:00:00.000Z' }],
+    meta: [{ id: 'pending', ids: { HP4: 'heritage' } }, { id: 'settings', cloud: { url: '', key: '', lastPull: '2026-10-13T00:00:00.000Z', lastPush: '' } }],
+  } });
+  cloud.busy.putPhoto = () => true;
+  const before = timers.length;
+  await app.cloudSync();
+  assert.ok(!stores.photos.get('PB1').cloud, 'not uploaded while the server is busy');
+  assert.ok(!stores.photos.get('PB1').cloudErrs, 'a busy server is not the photo\'s fault');
+  assert.ok(app.photoDue(stores.photos.get('PB1')), 'so it is due again right away');
+  const retry = timers.slice(before).filter(t => !t.interval && t.ms >= 2000 && t.ms <= 120000);
+  assert.ok(retry.length, 'a retry is scheduled within seconds, not left to the 2-minute timer');
+  assert.ok(cloud.records.has('HP4'), 'the record still went up before the originals');
+  cloud.busy.putPhoto = null;
+  await app.cloudSync();
+  assert.equal(stores.photos.get('PB1').cloud, 'file-PB1');
+});
+
+test('a new phone gets the photo list without thumbnails, then all thumbnails in one batched request', async () => {
+  const cloud = fakeCloud();
+  for (const id of ['PT1', 'PT2', 'PT3']) cloud.photos.set(id, { id, fileId: 'file-' + id, thumb: Buffer.from('thumb-' + id).toString('base64'), synced: cloud.now() });
+  cloud.records.set('F9', { id: 'F9', store: 'features', updated: '2026-10-10T00:00:00.000Z', synced: cloud.now(), data: point('F9', 44.39, 33.34, { photos: ['PT1', 'PT2', 'PT3'], updated: '2026-10-10T00:00:00.000Z' }).feature });
+  const { app, stores } = await loadApp({ cloud });
+  await app.cloudSync();
+  const acts = cloud.actions();
+  assert.equal(cloud.calls.find(c => c.action === 'pull').since, '', 'first sync of a new phone pulls everything');
+  assert.equal(acts.filter(a => a === 'thumbs').length, 1, 'all thumbnails in one batched request: ' + acts.join(','));
+  assert.ok(acts.indexOf('pull') < acts.indexOf('thumbs'));
+  assert.deepEqual(cloud.calls.find(c => c.action === 'thumbs').ids.sort(), ['PT1', 'PT2', 'PT3']);
+  assert.ok(!acts.includes('getPhoto'), 'no per-photo calls');
+  for (const id of ['PT1', 'PT2', 'PT3']) assert.ok(stores.photos.get(id).thumb, id + ' thumbnail on the phone');
+  const before = cloud.calls.length;
+  const urls = await Promise.all(['PT1', 'PT2', 'PT3'].map(id => app.photoUrl(id)));
+  assert.ok(urls.every(Boolean), 'every thumbnail shows');
+  assert.equal(cloud.calls.length, before, 'showing them needs no more requests');
+});
+
+test('a lock timeout in the owner\'s language (Arabic) is treated as busy, not as the photo\'s fault', async () => {
+  const { app, cloud, stores } = await loadApp({ seed: {
+    photos: [localPhoto('PK1')],
+    heritage: [{ id: 'HP5', photos: ['PK1'], updated: '2026-10-14T07:00:00.000Z' }],
+    meta: [{ id: 'pending', ids: { HP5: 'heritage' } }, { id: 'settings', cloud: { url: '', key: '', lastPull: '2026-10-13T00:00:00.000Z', lastPush: '' } }],
+  } });
+  cloud.lockTimeout = { putPhoto: () => true };
+  await app.cloudSync();
+  assert.ok(!stores.photos.get('PK1').cloud && !stores.photos.get('PK1').cloudErrs, 'not uploaded, not counted against the photo');
+  cloud.lockTimeout = {};
+  await app.cloudSync();
+  assert.equal(stores.photos.get('PK1').cloud, 'file-PK1');
 });
