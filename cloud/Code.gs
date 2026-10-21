@@ -28,7 +28,7 @@ const DAILY_PHOTOS_PER_DEVICE = 5000;
 const PHOTO_COLS = ['photoId', 'fileId', 'owner', 'created', 'device', 'synced', 'bytes', 'observer', 'lat', 'lng', 'link', 'name', 'thumb', 'previewId', 'deleted'];
 const MAX_THUMB_B64 = 45000;
 
-function doGet() { return out({ ok: true, service: 'site-survey-cloud', version: 10, open: OPEN_ACCESS }); }
+function doGet() { return out({ ok: true, service: 'site-survey-cloud', version: 11, open: OPEN_ACCESS }); }
 
 function doPost(e) {
   let req;
@@ -70,13 +70,13 @@ function props() { return PropertiesService.getScriptProperties(); }
 // every request needs a few ids (folder, sheet): read them through the cache — 50 phones syncing all day would
 // otherwise use up the Properties service's daily quota
 function prop(k) {
-  const c = CacheService.getScriptCache(), v = c.get('p:' + k);
-  if (v !== null) return v === '-' ? null : v;
+  const c = CacheService.getScriptCache(), v = c.get('p2:' + k);
+  if (v) return v;
   const x = props().getProperty(k);
-  c.put('p:' + k, x == null ? '-' : x, 21600);
+  if (x) c.put('p2:' + k, x, 21600);
   return x;
 }
-function setProp(k, v) { props().setProperty(k, v); CacheService.getScriptCache().put('p:' + k, v, 21600); }
+function setProp(k, v) { props().setProperty(k, v); CacheService.getScriptCache().put('p2:' + k, v, 21600); }
 function root() {
   const id = prop('ROOT');
   if (id) { try { return DriveApp.getFolderById(id); } catch (e) {} }
@@ -108,22 +108,47 @@ function folderFor(ownerId, ownerName) {
   const f = photosFolder().createFolder(name);
   setProp(key, f.getId()); return f;
 }
+// The records sheet, opened by its remembered id. If Google cannot open it for a moment: wait, retry, and
+// then answer "busy" — never make a new one while an id is known (that once hid all the work behind an empty
+// sheet). A new sheet is made only on a first setup or after a reset, and even then an existing records sheet
+// in the folder is adopted first.
 function book() {
+  if (book.ss) return book.ss;
   const id = prop('SHEET');
-  let ss = null;
-  if (id) { try { ss = SpreadsheetApp.openById(id); } catch (e) {} }
-  if (!ss) {
-    ss = SpreadsheetApp.create('سجل الرصد — ' + ROOT_NAME);
-    DriveApp.getFileById(ss.getId()).moveTo(root());
-    const r = ss.getSheets()[0]; r.setName('records'); r.appendRow(['id', 'store', 'updated', 'device', 'synced', 'json']); r.setFrozenRows(1);
-    ss.insertSheet('photos');
+  let ss = null, err = null;
+  if (id) {
+    for (let k = 0; k < 3 && !ss; k++) {
+      try { ss = SpreadsheetApp.openById(id); } catch (e) { err = e; if (k < 2) Utilities.sleep(1500 * (k + 1)); }
+    }
+    if (!ss) throw new Error('records sheet unavailable for now: ' + (err && err.message));   // → busy: true
+  } else {
+    ss = recordsSheetsInRoot()[0] || null;
+    if (!ss) {
+      ss = SpreadsheetApp.create('سجل الرصد — ' + ROOT_NAME);
+      DriveApp.getFileById(ss.getId()).moveTo(root());
+      const r = ss.getSheets()[0]; r.setName('records'); r.appendRow(['id', 'store', 'updated', 'device', 'synced', 'json']); r.setFrozenRows(1);
+      ss.insertSheet('photos');
+    }
     setProp('SHEET', ss.getId());
   }
   const ph = ss.getSheetByName('photos') || ss.insertSheet('photos');
   if (ph.getRange(1, PHOTO_COLS.length).getValue() !== PHOTO_COLS[PHOTO_COLS.length - 1]) {   // header (v1 had fewer columns)
     ph.getRange(1, 1, 1, PHOTO_COLS.length).setValues([PHOTO_COLS]); ph.setFrozenRows(1);
   }
+  book.ss = ss;
   return ss;
+}
+// records sheets directly in the survey folder (daily backups live in a sub-folder), the fullest first
+function recordsSheetsInRoot() {
+  const out = [], it = root().getFilesByType(MimeType.GOOGLE_SHEETS);
+  while (it.hasNext()) {
+    const f = it.next();
+    if (f.getName().indexOf('سجل الرصد') !== 0) continue;
+    try { out.push(SpreadsheetApp.open(f)); } catch (e) {}
+  }
+  const size = function (s) { return ['records', 'photos'].reduce(function (a, n) { const sh = s.getSheetByName(n); return a + (sh ? Math.max(0, sh.getLastRow() - 1) : 0); }, 0); };
+  out.forEach(function (s) { s._rows = size(s); });
+  return out.sort(function (a, b) { return b._rows - a._rows; });
 }
 function columnMap(sh) {                 // id (column A) -> row number
   const n = sh.getLastRow(), m = {};
@@ -412,6 +437,41 @@ function loc(req) {
   return { ok: true, now: t, rev: cache.get('rev') || '', locs: locs };
 }
 
+// ---- recovery (run from the editor): if the records sheet was swapped for an empty one, go back to the sheet that
+// holds the work, copy in whatever was saved to the other one meanwhile, and make every phone pull everything
+// again. Nothing is deleted: the other sheet is only renamed.
+function restoreRecordsSheet() {
+  const sheets = recordsSheetsInRoot();
+  if (!sheets.length) throw new Error('no records sheet in ' + root().getName());
+  const main = sheets[0], t = now();
+  let copied = 0;
+  sheets.slice(1).forEach(function (s) {
+    ['records', 'photos'].forEach(function (name) {
+      const from = s.getSheetByName(name), to = main.getSheetByName(name);
+      if (!from || !to || from.getLastRow() < 2) return;
+      const have = columnMap(to), w = name === 'records' ? 6 : PHOTO_COLS.length;
+      from.getRange(2, 1, from.getLastRow() - 1, w).getValues().forEach(function (v) {
+        const row = have[v[0]];
+        if (!row) { to.appendRow(v); copied++; return; }
+        const cur = to.getRange(row, 1, 1, w).getValues()[0];
+        const newer = name === 'records' ? String(v[2]) > String(cur[2]) : !cur[1] && v[1];     // newer record / original that only it has
+        if (newer) { to.getRange(row, 1, 1, w).setValues([v]); copied++; }
+      });
+    });
+    DriveApp.getFileById(s.getId()).setName(s.getName() + ' (فارغ — انضاف للأصلي ' + t.slice(0, 10) + ')');
+  });
+  // every phone pulls everything again (also the ones that synced against the empty sheet)
+  [['records', 5], ['photos', 6]].forEach(function (x) {
+    const sh = main.getSheetByName(x[0]), n = sh.getLastRow();
+    if (n > 1) sh.getRange(2, x[1], n - 1, 1).setValue(t);
+  });
+  setProp('SHEET', main.getId());
+  CacheService.getScriptCache().removeAll(['p:SHEET']);
+  bump();
+  Logger.log('restored: ' + main.getName() + ' ' + main.getUrl() + ' · ' + main._rows + ' rows · ' + copied + ' rows copied from ' + (sheets.length - 1) + ' other sheet(s)');
+  return 'ok';
+}
+
 // ---- fresh start for a new survey (run from the editor). Nothing is deleted: the current folder (photos, sheet,
 // backups) is renamed as an archive, the app gets a new empty folder + sheet, and every phone drops its data from
 // before this moment the next time it syncs (EPOCH).
@@ -421,7 +481,7 @@ function resetForNewSurvey() {
   const gone = ['ROOT', 'SHEET', 'PHOTOS', 'PREVIEWS', 'BACKUPS', 'BACKUP_DAY'];
   Object.keys(p.getProperties()).forEach(function (k) { if (k.indexOf('DIR_') === 0) gone.push(k); });
   gone.forEach(function (k) { p.deleteProperty(k); });
-  CacheService.getScriptCache().removeAll(gone.map(function (k) { return 'p:' + k; }));
+  CacheService.getScriptCache().removeAll(gone.map(function (k) { return 'p2:' + k; }).concat(gone.map(function (k) { return 'p:' + k; })));
   setProp('EPOCH', 'E' + Date.now());
   // the site team's shared live positions too
   const h = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, 'ssm-topic:RUSAFAMAPS', Utilities.Charset.UTF_8);
