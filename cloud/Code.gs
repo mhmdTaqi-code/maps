@@ -458,7 +458,7 @@ function restoreRecordsSheet() {
         if (newer) { to.getRange(row, 1, 1, w).setValues([v]); copied++; }
       });
     });
-    DriveApp.getFileById(s.getId()).setName(s.getName() + ' (فارغ — انضاف للأصلي ' + t.slice(0, 10) + ')');
+    DriveApp.getFileById(s.getId()).setName('(فارغ — انضاف للأصلي ' + t.slice(0, 10) + ') ' + s.getName());   // no longer starts with «سجل الرصد»
   });
   // every phone pulls everything again (also the ones that synced against the empty sheet)
   [['records', 5], ['photos', 6]].forEach(function (x) {
